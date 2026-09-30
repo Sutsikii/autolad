@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "autolad": {
+      "command": "C:/t/release/autolad.exe",
+      "args": ["--mcp"]
+    }
+  }
+}
