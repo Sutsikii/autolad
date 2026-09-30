@@ -11,6 +11,7 @@ pub mod filtergraph;
 pub mod frame;
 pub mod hash;
 pub mod parse;
+pub mod preview;
 pub mod probe;
 pub mod render;
 

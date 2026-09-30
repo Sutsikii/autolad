@@ -12,6 +12,10 @@ use autolad_core::ports::RenderOptions;
 use autolad_core::{Asset, AssetId, Edl, TimeRange};
 use autolad_media::frame::extract_frame;
 use autolad_media::hash::hash_file;
+use autolad_media::preview::{
+    build_proxy, build_thumbnail_strip, build_waveform, strip_layout, PEAKS_PER_SECOND,
+    TILE_HEIGHT, TILE_WIDTH,
+};
 use autolad_media::{Binaries, Encoder, FfmpegAnalyzer, FfmpegRenderer, FfprobeProbe};
 use autolad_transcribe::{ModelStore, TranscribeOptions, WhisperModel, WhisperTranscriber};
 use serde::Serialize;
@@ -42,6 +46,9 @@ pub struct Engine {
     data_dir: PathBuf,
     encoder: OnceCell<Encoder>,
     whisper: tokio::sync::Mutex<Option<(WhisperModel, WhisperTranscriber)>>,
+    /// Proxies are built one at a time: concurrent callers for the same asset must not write
+    /// the same file, and a single encode already uses every core.
+    proxy_gate: tokio::sync::Mutex<()>,
     state: Mutex<State>,
     jobs: Jobs,
     tmp_counter: AtomicU64,
@@ -58,6 +65,26 @@ pub struct AssetSummary {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub fps: Option<f64>,
+}
+
+/// Thumbnails of one asset laid out side by side in a single image.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct ThumbnailStrip {
+    pub path: PathBuf,
+    /// Seconds between two thumbnails: tile `i` shows the frame at `i * step`.
+    pub step: f64,
+    pub tiles: u32,
+    pub tile_width: u32,
+    pub tile_height: u32,
+}
+
+/// Loudness of one asset, one byte (`0..=255`) per `1 / peaks_per_second` seconds.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct Waveform {
+    pub path: PathBuf,
+    pub peaks_per_second: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -180,6 +207,10 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+async fn is_file(path: &Path) -> bool {
+    tokio::fs::metadata(path).await.is_ok_and(|m| m.is_file())
+}
+
 fn io_err(path: &Path, e: &std::io::Error) -> EngineError {
     EngineError::Io(format!("{}: {e}", path.display()))
 }
@@ -192,6 +223,7 @@ impl Engine {
             data_dir,
             encoder: OnceCell::new(),
             whisper: tokio::sync::Mutex::new(None),
+            proxy_gate: tokio::sync::Mutex::new(()),
             state: Mutex::new(State::default()),
             jobs: Jobs::default(),
             tmp_counter: AtomicU64::new(0),
@@ -272,6 +304,62 @@ impl Engine {
     fn entry(&self, id: &str) -> Result<AssetEntry, EngineError> {
         self.find_entry(id)
             .ok_or_else(|| EngineError::UnknownAsset(id.to_owned()))
+    }
+
+    // ---- Editor media (cached by asset id) ----------------------------------
+
+    /// Playback proxy of an asset, built on first use.
+    pub async fn ensure_proxy(&self, asset_id: &str) -> Result<PathBuf, EngineError> {
+        let entry = self.entry(asset_id)?;
+        let output = self.cache_file("proxies", asset_id, "mp4").await?;
+        let _turn = self.proxy_gate.lock().await;
+        if !is_file(&output).await {
+            build_proxy(&self.binaries, &entry.asset.path, &output).await?;
+        }
+        Ok(output)
+    }
+
+    pub async fn ensure_thumbnails(&self, asset_id: &str) -> Result<ThumbnailStrip, EngineError> {
+        let entry = self.entry(asset_id)?;
+        let layout = strip_layout(entry.asset.duration);
+        let output = self.cache_file("thumbs", asset_id, "jpg").await?;
+        if !is_file(&output).await {
+            let proxy = self.ensure_proxy(asset_id).await?;
+            build_thumbnail_strip(&self.binaries, &proxy, &output, layout).await?;
+        }
+        Ok(ThumbnailStrip {
+            path: output,
+            step: layout.step,
+            tiles: layout.tiles,
+            tile_width: TILE_WIDTH,
+            tile_height: TILE_HEIGHT,
+        })
+    }
+
+    pub async fn ensure_waveform(&self, asset_id: &str) -> Result<Waveform, EngineError> {
+        let entry = self.entry(asset_id)?;
+        let output = self.cache_file("waves", asset_id, "bin").await?;
+        if !is_file(&output).await {
+            build_waveform(&self.binaries, &entry.asset.path, &output).await?;
+        }
+        Ok(Waveform {
+            path: output,
+            peaks_per_second: PEAKS_PER_SECOND,
+        })
+    }
+
+    /// `<data>/<kind>/<asset id>.<ext>`, creating the folder.
+    async fn cache_file(
+        &self,
+        kind: &str,
+        asset_id: &str,
+        ext: &str,
+    ) -> Result<PathBuf, EngineError> {
+        let dir = self.data_dir.join(kind);
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(|e| io_err(&dir, &e))?;
+        Ok(dir.join(format!("{asset_id}.{ext}")))
     }
 
     // ---- Analysis ----------------------------------------------------------

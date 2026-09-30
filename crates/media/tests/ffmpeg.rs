@@ -11,6 +11,9 @@ use autolad_core::edl::{build_silence_cut_edl, SilenceSettings};
 use autolad_core::ports::RenderOptions;
 use autolad_core::{Asset, AssetId, Cut, Edl, TimeRange};
 use autolad_media::frame::extract_frame;
+use autolad_media::preview::{
+    build_proxy, build_thumbnail_strip, build_waveform, strip_layout, PEAKS_PER_SECOND,
+};
 use autolad_media::{Binaries, Encoder, FfmpegAnalyzer, FfmpegRenderer, FfprobeProbe};
 
 fn binaries() -> Binaries {
@@ -232,4 +235,46 @@ async fn extracts_a_png_frame() {
     extract_frame(&b, &clip, 1.5, &png, 160).await.unwrap();
     let bytes = std::fs::read(&png).unwrap();
     assert_eq!(&bytes[1..4], b"PNG");
+}
+
+#[tokio::test]
+async fn editor_media_is_built_from_a_real_clip() {
+    let b = binaries();
+    let dir = scratch("preview");
+    let source = dir.join("clip.mp4");
+    make_clip(&b, &source, "1280x720");
+
+    let proxy = dir.join("proxy.mp4");
+    build_proxy(&b, &source, &proxy).await.unwrap();
+    let info = FfprobeProbe::new(b.clone())
+        .probe_file(&proxy)
+        .await
+        .unwrap();
+    assert_eq!(info.height, Some(540));
+    assert!(info.has_audio && info.has_video);
+
+    let strip = dir.join("strip.jpg");
+    let layout = strip_layout(info.duration);
+    build_thumbnail_strip(&b, &proxy, &strip, layout)
+        .await
+        .unwrap();
+    assert!(std::fs::metadata(&strip).unwrap().len() > 0);
+
+    let wave = dir.join("wave.bin");
+    build_waveform(&b, &source, &wave).await.unwrap();
+    let peaks = std::fs::read(&wave).unwrap();
+    // 3 s at PEAKS_PER_SECOND, give or take the encoder's padding.
+    assert!(peaks.len().abs_diff(3 * PEAKS_PER_SECOND as usize) <= 10);
+    // The tone is muted between 1 s and 2 s: loud outside, silent inside.
+    // ffmpeg's sine has amplitude 0.125, about 90 once compressed.
+    assert!(peaks[50] > 60, "tone should be loud at 0.5 s");
+    assert!(peaks[150] < 10, "gap should be silent at 1.5 s");
+
+    // No half-written leftovers next to the published files.
+    let leftovers = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().contains(".part."))
+        .count();
+    assert_eq!(leftovers, 0);
 }
