@@ -26,6 +26,9 @@ interface TranscriptState {
   model: string;
   /** Asset being transcribed, and since when (ms), to show that something is happening. */
   running: { assetId: string; since: number } | null;
+  /** Text edit in progress (cut, clean-up), shown while it runs. */
+  editing: string | null;
+  setEditing: (editing: string | null) => void;
   setLanguage: (language: string) => void;
   setModel: (model: string) => void;
   setReport: (report: TranscriptReport) => void;
@@ -39,6 +42,8 @@ export const useTranscriptStore = create<TranscriptState>((set, get) => ({
   language: "auto",
   model: "small",
   running: null,
+  editing: null,
+  setEditing: (editing) => set({ editing }),
   setLanguage: (language) => set({ language }),
   setModel: (model) => set({ model }),
   setReport: (report) => set((s) => ({ byAsset: { ...s.byAsset, [report.asset]: report } })),

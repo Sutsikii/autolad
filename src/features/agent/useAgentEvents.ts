@@ -8,6 +8,9 @@ import { events } from "@/ipc";
 import { useAgentStore } from "./store";
 import { resolveTarget } from "./targets";
 
+/** Tools whose work shows in the transcript tab, which is brought forward for them. */
+const TRANSCRIPT_TOOLS = new Set(["transcribe", "cut_text", "remove_fillers", "remove_retakes"]);
+
 /**
  * Follows an AI agent: the cursor glides to where each action happens, clicks when it is done,
  * and the UI reloads the project it changed. The work itself already ran in the backend.
@@ -23,7 +26,7 @@ export function useAgentEvents(): void {
           const agent = useAgentStore.getState();
           if (payload.phase === "started") {
             // The transcript tab must be visible for the cursor to have something to go to.
-            if (payload.tool === "transcribe") useSidebarStore.getState().setTab("transcript");
+            if (TRANSCRIPT_TOOLS.has(payload.tool)) useSidebarStore.getState().setTab("transcript");
             const target = resolveTarget(payload);
             if (target) agent.moveTo(target, payload.label);
             return;
@@ -34,7 +37,7 @@ export function useAgentEvents(): void {
           }
           agent.click();
           if (payload.changes_project) void refreshProject();
-          if (payload.tool === "transcribe") {
+          if (TRANSCRIPT_TOOLS.has(payload.tool)) {
             void useTranscriptStore.getState().loadStored(useLibraryStore.getState().assets);
           }
           if (payload.tool === "preview_frame" && payload.time !== null) {

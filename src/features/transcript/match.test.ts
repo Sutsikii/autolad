@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CutSummary } from "@/ipc";
-import { activePhraseIndex, formatStamp, timelinePositionOf } from "./match";
+import { activePhraseIndex, formatStamp, isOnTimeline, timelinePositionOf } from "./match";
 
 const cut = (asset: string, start: number, duration: number, at: number): CutSummary => ({
   index: 0,
@@ -57,5 +57,19 @@ describe("formatStamp", () => {
   it("copes with negative and non-finite values", () => {
     expect(formatStamp(-3)).toBe("0:00");
     expect(formatStamp(Number.NaN)).toBe("0:00");
+  });
+});
+
+describe("isOnTimeline", () => {
+  const cuts = [cut("a", 10, 5, 0)];
+
+  it("is true while any part of the phrase is played", () => {
+    expect(isOnTimeline(cuts, "a", { start: 9, end: 11 })).toBe(true);
+    expect(isOnTimeline(cuts, "a", { start: 12, end: 13 })).toBe(true);
+  });
+
+  it("is false once the phrase is cut out or belongs to another source", () => {
+    expect(isOnTimeline(cuts, "a", { start: 15, end: 16 })).toBe(false);
+    expect(isOnTimeline(cuts, "b", { start: 11, end: 12 })).toBe(false);
   });
 });

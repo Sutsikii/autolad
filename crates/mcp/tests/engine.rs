@@ -11,7 +11,10 @@ use std::time::{Duration, Instant};
 use autolad_core::edl::SilenceSettings;
 use autolad_core::edl_edit::EdlOp;
 use autolad_core::AssetId;
-use autolad_mcp::engine::{BuildEdlRequest, Engine, FrameTarget, RenderRequest, TranscribeRequest};
+use autolad_mcp::engine::{
+    BuildEdlRequest, CutTextRequest, Engine, FrameTarget, Occurrence, RenderRequest,
+    TranscribeRequest,
+};
 use autolad_mcp::jobs::JobState;
 use autolad_mcp::EngineError;
 use autolad_media::{Binaries, FfprobeProbe};
@@ -802,4 +805,121 @@ async fn every_video_shape_is_imported_previewed_and_exported_at_the_right_size(
             "{label}: draft export size"
         );
     }
+}
+
+/// Speech synthesized with the Windows voices, muxed under a test pattern.
+fn make_speech_clip(dir: &Path, text: &str) -> PathBuf {
+    let wav = dir.join("speech.wav");
+    let script = format!(
+        "Add-Type -AssemblyName System.Speech; \
+         $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; \
+         $s.SelectVoice('Microsoft David Desktop'); \
+         $s.SetOutputToWaveFile('{}'); $s.Speak('{text}'); $s.Dispose()",
+        wav.display()
+    );
+    let status = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .status()
+        .unwrap();
+    assert!(status.success(), "speech synthesis failed");
+
+    let clip = dir.join("speech.mp4");
+    let status = Command::new(binaries().ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-y"])
+        .args(["-f", "lavfi", "-i", "testsrc=size=320x240:rate=25"])
+        .arg("-i")
+        .arg(&wav)
+        .args(["-shortest", "-c:v", "libx264", "-preset", "ultrafast"])
+        .args(["-pix_fmt", "yuv420p", "-c:a", "aac"])
+        .arg(&clip)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    clip
+}
+
+/// Real speech through whisper's word mode. Needs the Windows speech voices and the `small`
+/// model (downloaded on first run), so it is not part of the default run:
+/// `cargo test -p autolad-mcp --test engine -- --ignored --nocapture`.
+#[tokio::test]
+#[ignore = "needs Windows speech synthesis and a Whisper model"]
+async fn a_spoken_edit_is_cleaned_up_by_text() {
+    let dir = scratch("speech");
+    let clip = make_speech_clip(
+        &dir,
+        "Hello everyone. Today we are going. Today we are going to talk about video editing. \
+         Cutting silences is really useful. This sentence must go away. \
+         And that is all for today.",
+    );
+    let engine = engine(&dir);
+    let asset = engine.import_media(&clip).await.unwrap().asset;
+    engine
+        .edit_edl(vec![EdlOp::Insert {
+            index: 0,
+            asset: AssetId(asset.id.clone()),
+            start: 0.0,
+            end: asset.duration,
+        }])
+        .await
+        .unwrap();
+
+    let retakes = engine.remove_retakes(true).await.unwrap();
+    println!("retakes: {:#?}", retakes.removed);
+    assert_eq!(retakes.removed.len(), 1, "{:?}", retakes.removed);
+    assert!(retakes.removed[0].text.contains("going"));
+
+    engine.remove_retakes(false).await.unwrap();
+    let cut = engine
+        .cut_text(CutTextRequest {
+            text: "This sentence must go away.".into(),
+            occurrence: Occurrence::Nth(1),
+        })
+        .await
+        .unwrap();
+    assert!(cut.removed_seconds > 1.0, "{cut:?}");
+
+    let said = engine.edit_transcript();
+    println!("edit says: {}", said.full_text);
+    assert!(said.word_level);
+    let text = said.full_text.to_lowercase();
+    assert!(!text.contains("go away"), "{text}");
+    assert_eq!(text.matches("today we are going").count(), 1, "{text}");
+    assert!(text.contains("all for today"), "{text}");
+
+    // The phrase view of the source is still there for the transcript tab.
+    let phrases = engine.find_transcript(&asset.id).unwrap();
+    assert!(phrases.segments.len() < 12, "{:?}", phrases.segments);
+
+    // What the rendered file really says, heard by whisper again.
+    let out = dir.join("cleaned.mp4");
+    let job = engine
+        .render_start(RenderRequest {
+            output: out.clone(),
+            draft: true,
+            width: None,
+            height: None,
+            fps: None,
+            overwrite: true,
+            loudness: Some(-14.0),
+        })
+        .await
+        .unwrap();
+    let status = wait_for_job(&engine, &job).await;
+    assert!(matches!(status.state, JobState::Done { .. }), "{status:?}");
+    let rendered = engine.import_media(&out).await.unwrap().asset;
+    let heard = engine
+        .transcribe(TranscribeRequest {
+            asset_id: rendered.id,
+            language: Some("en".into()),
+            model: None,
+            word_timestamps: false,
+        })
+        .await
+        .unwrap()
+        .full_text
+        .to_lowercase();
+    println!("render says: {heard}");
+    assert!(!heard.contains("go away"), "{heard}");
+    assert_eq!(heard.matches("today we are going").count(), 1, "{heard}");
+    assert!(heard.contains("all for today"), "{heard}");
 }

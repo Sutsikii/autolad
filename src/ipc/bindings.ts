@@ -135,6 +135,45 @@ async cachedTranscript(assetId: string) : Promise<Result<TranscriptReport | null
 }
 },
 /**
+ * What the edit says, sentence by sentence, from the transcripts already computed.
+ */
+async editTranscript() : Promise<Result<EditTranscript, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("edit_transcript") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Cuts a phrase of `asset_id`'s transcript (said around `start..end` in the source) out of
+ * the edit, at word precision.
+ */
+async cutPhrase(assetId: string, start: number, end: number, text: string) : Promise<Result<TextEditReport, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("cut_phrase", { assetId, start, end, text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async removeFillers() : Promise<Result<TextEditReport, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_fillers") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async removeRetakes() : Promise<Result<TextEditReport, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_retakes") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Writes the project to `path` and keeps that file up to date from now on.
  */
 async saveProject(path: string) : Promise<Result<string, AppError>> {
@@ -245,6 +284,20 @@ export type CutSummary = { index: number; asset: string; start: number; end: num
  */
 timeline_start: number }
 /**
+ * One sentence of the edit, at its position on the edited timeline.
+ */
+export type EditLine = { start: number; end: number; text: string }
+export type EditTranscript = { lines: EditLine[]; full_text: string; 
+/**
+ * Every clip has word timings. Otherwise some lines are whole whisper phrases, whose
+ * bounds can be a second off.
+ */
+word_level: boolean; 
+/**
+ * Assets of the edit that have sound but no transcript yet: call `transcribe` on them.
+ */
+untranscribed: string[] }
+/**
  * Edit decision list: the ordered cuts that make up the final video.
  */
 export type Edl = { cuts: Cut[] }
@@ -276,7 +329,12 @@ export type EdlOp =
 /**
  * Removes every cut.
  */
-{ op: "clear" }
+{ op: "clear" } | 
+/**
+ * Removes the source range `start..end` of `asset` wherever the EDL plays it, trimming or
+ * splitting the cuts it overlaps. How text-based edits (a sentence, a filler) are applied.
+ */
+{ op: "remove_range"; asset: AssetId; start: number; end: number }
 export type EdlSummary = { cuts: CutSummary[]; total_duration: number; 
 /**
  * Names of the changes `undo` and `redo` would revert or re-apply.
@@ -321,6 +379,23 @@ margin: number;
  * Kept segments shorter than this are discarded.
  */
 min_segment: number }
+/**
+ * A piece of speech removed (or that would be removed) from the edit.
+ */
+export type TextCut = { text: string; 
+/**
+ * Where it was on the edited timeline before the change.
+ */
+timeline_start: number; duration: number; 
+/**
+ * For a failed take: the retry that is kept instead.
+ */
+replaced_by: string | null }
+export type TextEditReport = { removed: TextCut[]; removed_seconds: number; 
+/**
+ * `false` for a dry run: nothing was changed.
+ */
+applied: boolean; edl: EdlSummary }
 /**
  * Thumbnails of one asset laid out side by side in a single image.
  */

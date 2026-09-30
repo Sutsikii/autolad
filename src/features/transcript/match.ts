@@ -24,6 +24,11 @@ export function timelinePositionOf(
   return cut ? cut.timeline_start + (sourceTime - cut.start) : null;
 }
 
+/** Whether any part of a source phrase is still played by the timeline. */
+export function isOnTimeline(cuts: CutSummary[], assetId: string, phrase: Phrase): boolean {
+  return cuts.some((c) => c.asset === assetId && c.start < phrase.end && c.end > phrase.start);
+}
+
 /** `m:ss`, or `h:mm:ss` past an hour. */
 export function formatStamp(seconds: number): string {
   const total = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));

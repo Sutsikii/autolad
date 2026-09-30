@@ -2,6 +2,7 @@
 import { commands, events, type AppError, type Result } from "./bindings";
 
 export { commands as api, events };
+export type { Result };
 export type {
   AgentActivity,
   AppError,
@@ -15,6 +16,8 @@ export type {
   JobStatus,
   ProjectStatus,
   SilenceSettings,
+  TextCut,
+  TextEditReport,
   TimeRange,
   TranscriptEntry,
   TranscriptReport,

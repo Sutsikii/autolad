@@ -6,8 +6,9 @@ import type { AssetSummary, TranscriptReport } from "@/ipc";
 import { cn } from "@/shared/lib/utils";
 import { messageOf, notify } from "@/shared/notify";
 import { btn, btnPrimary, input } from "@/shared/ui/styles";
-import { activePhraseIndex, formatStamp, timelinePositionOf } from "./match";
+import { activePhraseIndex, formatStamp, isOnTimeline, timelinePositionOf } from "./match";
 import { LANGUAGES, MODELS, useTranscriptStore } from "./store";
+import { cutPhrase, removeFillers, removeRetakes } from "./textEdit";
 
 interface Props {
   asset: AssetSummary | null;
@@ -74,7 +75,45 @@ export function TranscriptPanel({ asset }: Props) {
           </p>
         )}
       </div>
+      <CleanUp />
       {report ? <Phrases asset={asset} report={report} /> : <Empty busy={thisOneRuns} />}
+    </div>
+  );
+}
+
+/** Word-precise clean-up of the whole timeline, not just the selected clip. */
+function CleanUp() {
+  const editing = useTranscriptStore((s) => s.editing);
+  const hasClips = useTimelineStore((s) => s.cuts.length > 0);
+  const disabled = !hasClips || editing !== null;
+  return (
+    <div data-agent="clean-up" className="space-y-2 border-b border-black/40 p-3">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+        Clean up the timeline
+      </p>
+      <div className="flex gap-2">
+        <button
+          className={cn(btn, "flex-1")}
+          disabled={disabled}
+          onClick={() => void removeFillers()}
+          title="Cut every euh, hum, um… from the timeline (Ctrl+Z to undo)"
+        >
+          Hesitations
+        </button>
+        <button
+          className={cn(btn, "flex-1")}
+          disabled={disabled}
+          onClick={() => void removeRetakes()}
+          title="Keep only the last attempt of sentences that were started over (Ctrl+Z to undo)"
+        >
+          Failed takes
+        </button>
+      </div>
+      {editing && (
+        <p className="text-[11px] leading-relaxed text-neutral-500">
+          {editing}… The first time, each clip is transcribed word by word.
+        </p>
+      )}
     </div>
   );
 }
@@ -110,6 +149,7 @@ function Phrases({ asset, report }: PhrasesProps) {
   const cuts = useTimelineStore((s) => s.cuts);
   const seek = useTimelineStore((s) => s.seek);
   const playing = usePreviewStore((s) => s.playing);
+  const editing = useTranscriptStore((s) => s.editing);
   // Only the playhead's clip can say which phrase is being spoken, and only if it is this asset.
   const active = useTimelineStore((s) => {
     const here = locate(s.cuts, s.playhead);
@@ -146,23 +186,44 @@ function Phrases({ asset, report }: PhrasesProps) {
         </button>
       </div>
       <ul className="min-h-0 flex-1 select-text overflow-y-auto px-1 pb-2">
-        {report.segments.map((phrase, index) => (
-          <li key={`${phrase.start}-${index}`} ref={index === active ? activeRef : undefined}>
-            <button
-              onClick={() => jump(phrase.start)}
-              title="Go to this phrase on the timeline"
-              className={cn(
-                "flex w-full gap-2 rounded px-2 py-1 text-left text-xs leading-snug",
-                index === active ? "bg-sky-700/40 text-neutral-50" : "text-neutral-300 hover:bg-neutral-700/40",
-              )}
+        {report.segments.map((phrase, index) => {
+          const kept = isOnTimeline(cuts, asset.id, phrase);
+          return (
+            <li
+              key={`${phrase.start}-${index}`}
+              ref={index === active ? activeRef : undefined}
+              className="group relative"
             >
-              <span className="w-10 shrink-0 font-mono text-[11px] text-sky-400">
-                {formatStamp(phrase.start)}
-              </span>
-              <span>{phrase.text.trim()}</span>
-            </button>
-          </li>
-        ))}
+              <button
+                onClick={() => jump(phrase.start)}
+                title={kept ? "Go to this phrase on the timeline" : "Cut from the timeline"}
+                className={cn(
+                  "flex w-full gap-2 rounded px-2 py-1 pr-7 text-left text-xs leading-snug",
+                  index === active
+                    ? "bg-sky-700/40 text-neutral-50"
+                    : "text-neutral-300 hover:bg-neutral-700/40",
+                  !kept && "text-neutral-600 line-through",
+                )}
+              >
+                <span className="w-10 shrink-0 font-mono text-[11px] text-sky-400">
+                  {formatStamp(phrase.start)}
+                </span>
+                <span>{phrase.text.trim()}</span>
+              </button>
+              {kept && (
+                <button
+                  aria-label="Cut this phrase"
+                  title="Cut this phrase from the timeline (Ctrl+Z to undo)"
+                  disabled={editing !== null}
+                  onClick={() => void cutPhrase(asset.id, phrase.start, phrase.end, phrase.text)}
+                  className="absolute right-1 top-1 hidden rounded px-1 text-xs text-neutral-400 hover:bg-neutral-600 hover:text-neutral-100 group-hover:block disabled:opacity-40"
+                >
+                  ✂
+                </button>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </>
   );

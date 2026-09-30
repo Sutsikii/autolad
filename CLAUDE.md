@@ -117,6 +117,7 @@ pnpm typecheck
 pnpm test               # vitest (front)
 pwsh scripts/fetch-ffmpeg.ps1   # requis avant build/tests : installe les sidecars ffmpeg/ffprobe
 cargo test -p autolad-transcribe --test whisper -- --ignored --nocapture   # télécharge un modèle (~190 Mo)
+cargo test -p autolad-mcp --test engine -- --ignored --nocapture          # montage par le texte sur vraie parole (voix Windows + whisper)
 autolad.exe --mcp       # serveur MCP ; en dev : `cargo run -q -p autolad -- --mcp` (voir .mcp.json)
 UPDATE_BINDINGS=1 cargo test -p autolad bindings   # regenerate src/ipc/bindings.ts
 ```
@@ -175,6 +176,8 @@ UPDATE_BINDINGS=1 cargo test -p autolad bindings   # regenerate src/ipc/bindings
 - Undo/redo : l'`Engine` garde un historique de l'EDL (`core::history`, snapshots, 200 max, session seulement, remis à zéro par Nouveau/Ouvrir). Toute modif d'EDL passe par `State::commit` avec un libellé (`describe_ops`) ; une modif sans effet n'est pas enregistrée. UI (Ctrl+Z, Ctrl+Shift+Z/Ctrl+Y, boutons de la timeline) et agent (outils `undo`/`redo`) partagent le même historique ; `EdlSummary.history` dit ce qu'annuler/rétablir ferait. Les imports ne s'annulent pas.
 
 - Finition audio au rendu : fondu de 10 ms (`CUT_FADE`, plus court sur un cut minuscule) à chaque raccord où le son saute ; aucun fondu entre deux cuts qui se suivent dans la même source (split). Normalisation `loudnorm` une passe après le `concat` (`RenderOptions.loudness`, -14 LUFS par défaut, TP -1.5, LRA 11), désactivable (case « Loudness » de l'export, `normalize_audio=false` côté MCP). La preview ne l'applique pas.
+
+- Montage par le texte (`core::transcript`, algos purs ; `mcp/src/engine/text.rs`) : on travaille sur les mots *du montage* (`edit_words` : un mot appartient au cut qui contient son milieu). `cut_text` (recherche insensible à la casse/ponctuation, tolère 1 mot sur 5 absent du transcript sauf le premier et le dernier), `remove_fillers` (liste fermée de sons d'hésitation, jamais de vrais mots comme « ben »), `remove_retakes` (phrase recommencée : même début ou quasi-répétition → on garde la dernière prise ; une interjection courte entre les deux part avec la prise ratée). Tout devient des `EdlOp::RemoveRange` (plage source retirée partout, sans laisser de bout < 40 ms) appliqués en un seul changement annulable. Les timings par mot sont calculés à la première demande (whisper mode mot, même modèle/langue que le transcript en phrases) et stockés dans le projet ; un transcript seulement en mots est affiché regroupé en phrases. `get_edit_transcript` ne lance jamais de transcription. Whisper omet souvent les « euh » : `remove_fillers` n'attrape que ceux qu'il écrit. Test sur vraie parole (voix SAPI, re-transcription du rendu) : `a_spoken_edit_is_cleaned_up_by_text`, `#[ignore]`.
 
 - Fichier projet : JSON versionné (`version: 1`), écrit atomiquement, autosauvegardé une fois lié par `save_project`. L'UI et l'agent partagent le même fichier lié ; « Nouveau » le délie (plus aucune écriture vers l'ancien fichier).
 - Modèle Whisper par défaut : `small` q5_1. Backend GPU : Vulkan.

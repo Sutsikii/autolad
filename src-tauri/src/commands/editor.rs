@@ -4,8 +4,9 @@ use autolad_core::edl::SilenceSettings;
 use autolad_core::edl_edit::EdlOp;
 use autolad_mcp::base64;
 use autolad_mcp::engine::{
-    AssetSummary, BuildEdlRequest, EdlSummary, FrameTarget, HistoryStep, OpenReport, ProjectStatus,
-    RenderRequest, ThumbnailStrip, TranscribeRequest, TranscriptReport,
+    AssetSummary, BuildEdlRequest, CutTextRequest, EditTranscript, EdlSummary, FrameTarget,
+    HistoryStep, Occurrence, OpenReport, ProjectStatus, RenderRequest, TextEditReport,
+    ThumbnailStrip, TranscribeRequest, TranscriptReport,
 };
 use autolad_mcp::jobs::JobStatus;
 use serde::Serialize;
@@ -155,6 +156,47 @@ pub fn cached_transcript(
     asset_id: String,
 ) -> Result<Option<TranscriptReport>, AppError> {
     Ok(state.engine()?.find_transcript(&asset_id))
+}
+
+/// What the edit says, sentence by sentence, from the transcripts already computed.
+#[tauri::command]
+#[specta::specta]
+pub fn edit_transcript(state: State<'_, AppState>) -> Result<EditTranscript, AppError> {
+    Ok(state.engine()?.edit_transcript())
+}
+
+/// Cuts a phrase of `asset_id`'s transcript (said around `start..end` in the source) out of
+/// the edit, at word precision.
+#[tauri::command]
+#[specta::specta]
+pub async fn cut_phrase(
+    state: State<'_, AppState>,
+    asset_id: String,
+    start: f64,
+    end: f64,
+    text: String,
+) -> Result<TextEditReport, AppError> {
+    let request = CutTextRequest {
+        text,
+        occurrence: Occurrence::Near {
+            asset_id,
+            start,
+            end,
+        },
+    };
+    Ok(state.engine()?.cut_text(request).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn remove_fillers(state: State<'_, AppState>) -> Result<TextEditReport, AppError> {
+    Ok(state.engine()?.remove_fillers(false).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn remove_retakes(state: State<'_, AppState>) -> Result<TextEditReport, AppError> {
+    Ok(state.engine()?.remove_retakes(false).await?)
 }
 
 /// Writes the project to `path` and keeps that file up to date from now on.

@@ -57,6 +57,10 @@ export function resolveTarget(site: ActionSite): Point | null {
       return centerOf("transcript") ?? centerOf("auto-cut");
     case "edit_edl":
       return (site.index === null ? null : clipPoint(site.index)) ?? centerOf("timeline");
+    case "cut_text":
+    case "remove_fillers":
+    case "remove_retakes":
+      return centerOf("clean-up") ?? centerOf("transcript");
     case "undo":
     case "redo":
       return centerOf(site.tool);

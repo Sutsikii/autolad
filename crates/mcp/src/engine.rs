@@ -10,6 +10,7 @@ use autolad_core::edl::{build_silence_cut_edl, SilenceSettings};
 use autolad_core::edl_edit::{apply_ops, describe_ops, EdlOp};
 use autolad_core::history::{History, HistoryStatus};
 use autolad_core::ports::{RenderOptions, TranscriptSegment};
+use autolad_core::transcript::sentences;
 use autolad_core::{Asset, AssetId, Edl, TimeRange};
 use autolad_media::frame::extract_frame;
 use autolad_media::hash::hash_file;
@@ -25,6 +26,9 @@ use tokio::sync::OnceCell;
 use crate::error::EngineError;
 use crate::jobs::{JobStatus, Jobs};
 use crate::project_file::{AssetEntry, ProjectFile};
+
+mod text;
+pub use text::{CutTextRequest, EditLine, EditTranscript, Occurrence, TextCut, TextEditReport};
 
 const DEFAULT_NOISE_DB: f64 = -30.0;
 const DEFAULT_MIN_SILENCE: f64 = 0.3;
@@ -523,24 +527,32 @@ impl Engine {
     /// A transcript already computed for `asset_id` (phrase mode preferred), without starting
     /// one: the UI shows it as soon as the clip is selected, and never triggers a long job.
     pub fn find_transcript(&self, asset_id: &str) -> Option<TranscriptReport> {
-        let state = lock(&self.state);
-        let mut found: Vec<(TranscriptKey, &Vec<TranscriptSegment>)> = state
+        let mut found = self.stored_transcripts(asset_id);
+        found.sort_by_key(|(key, _)| key.word_timestamps);
+        let (key, segments) = found.into_iter().next()?;
+        // Only word timings exist when text editing asked for them: read them as sentences.
+        let segments = if key.word_timestamps {
+            sentences(&segments)
+        } else {
+            segments
+        };
+        Some(transcript_report(asset_id.to_owned(), key, segments, true))
+    }
+
+    /// Every transcript stored for `asset_id`, whatever its model, language and mode.
+    fn stored_transcripts(&self, asset_id: &str) -> Vec<(TranscriptKey, Vec<TranscriptSegment>)> {
+        lock(&self.state)
             .project
             .transcripts
             .iter()
             .filter_map(|(key, segments)| {
                 let (id, rest) = key.split_once(':')?;
-                (id == asset_id).then_some((TranscriptKey::parse(rest)?, segments))
+                if id != asset_id {
+                    return None;
+                }
+                Some((TranscriptKey::parse(rest)?, segments.clone()))
             })
-            .collect();
-        found.sort_by_key(|(key, _)| key.word_timestamps);
-        let (key, segments) = found.into_iter().next()?;
-        Some(transcript_report(
-            asset_id.to_owned(),
-            key,
-            segments.clone(),
-            true,
-        ))
+            .collect()
     }
 
     /// Loads the model once and reuses it: loading takes a while and GPU memory.
@@ -596,6 +608,11 @@ impl Engine {
     }
 
     pub async fn edit_edl(&self, ops: Vec<EdlOp>) -> Result<EdlSummary, EngineError> {
+        self.change_edl(&ops, describe_ops(&ops)).await
+    }
+
+    /// Applies `ops` atomically as one undoable change named `label`.
+    async fn change_edl(&self, ops: &[EdlOp], label: String) -> Result<EdlSummary, EngineError> {
         let summary = {
             let mut state = lock(&self.state);
             let assets: Vec<Asset> = state
@@ -604,8 +621,8 @@ impl Engine {
                 .iter()
                 .map(|e| e.asset.clone())
                 .collect();
-            let edited = apply_ops(&state.project.edl, &ops, &assets)?;
-            state.commit(edited, describe_ops(&ops));
+            let edited = apply_ops(&state.project.edl, ops, &assets)?;
+            state.commit(edited, label);
             state.summary()
         };
         self.persist().await?;
@@ -1167,6 +1184,148 @@ mod tests {
         let engine = engine_with_asset();
         engine.edit_edl(vec![EdlOp::Clear]).await.unwrap();
         assert_eq!(engine.edl_summary().history, HistoryStatus::default());
+    }
+
+    /// One word every 0.5 s, 0.4 s long.
+    fn spoken(text: &str) -> Vec<TranscriptSegment> {
+        text.split(' ')
+            .enumerate()
+            .map(|(i, w)| segment(i as f64 * 0.5, i as f64 * 0.5 + 0.4, &format!(" {w}")))
+            .collect()
+    }
+
+    /// Asset "a" (10 s) fully on the timeline, with a stored word-level transcript.
+    async fn engine_saying(text: &str) -> Engine {
+        let engine = engine_with_transcripts(&[("a:small:fr:true", spoken(text))]);
+        lock(&engine.state)
+            .project
+            .assets
+            .push(entry(Some(640), Some(360), Some(25.0)));
+        engine.edit_edl(vec![insert(0.0, 10.0)]).await.unwrap();
+        engine
+    }
+
+    fn said(engine: &Engine) -> String {
+        engine.edit_transcript().full_text
+    }
+
+    #[tokio::test]
+    async fn the_edit_transcript_follows_the_cuts() {
+        let engine = engine_saying("Bonjour à tous. On commence.").await;
+        let transcript = engine.edit_transcript();
+        assert!(transcript.word_level && transcript.untranscribed.is_empty());
+        assert_eq!(transcript.lines.len(), 2);
+        assert_eq!(transcript.lines[1].text, "On commence.");
+        assert_eq!(transcript.lines[1].start, 1.5);
+
+        // Cutting the first second out moves the rest to the start of the timeline.
+        engine
+            .edit_edl(vec![EdlOp::Trim {
+                index: 0,
+                start: 1.5,
+                end: 10.0,
+            }])
+            .await
+            .unwrap();
+        let transcript = engine.edit_transcript();
+        assert_eq!(transcript.full_text, "On commence.");
+        assert_eq!(transcript.lines[0].start, 0.0);
+    }
+
+    #[tokio::test]
+    async fn a_clip_without_transcript_is_reported() {
+        let engine = engine_with_asset();
+        engine.edit_edl(vec![insert(0.0, 5.0)]).await.unwrap();
+        let transcript = engine.edit_transcript();
+        assert!(transcript.lines.is_empty() && !transcript.word_level);
+        assert_eq!(transcript.untranscribed, ["a"]);
+    }
+
+    #[tokio::test]
+    async fn cutting_text_removes_its_words_and_can_be_undone() {
+        let engine = engine_saying("on coupe ceci mais pas cela").await;
+        let request = |text: &str, occurrence| CutTextRequest {
+            text: text.to_owned(),
+            occurrence,
+        };
+        let report = engine
+            .cut_text(request("Coupe ceci", Occurrence::Nth(1)))
+            .await
+            .unwrap();
+        assert!(report.applied);
+        assert_eq!(report.removed[0].text, "coupe ceci");
+        assert!((report.removed_seconds - 0.9).abs() < 1e-9);
+        assert_eq!(said(&engine), "on mais pas cela");
+        assert_eq!(
+            report.edl.history.undo.as_deref(),
+            Some("Cut \u{201c}Coupe ceci\u{201d}")
+        );
+
+        let missing = engine
+            .cut_text(request("coupe ceci", Occurrence::Nth(1)))
+            .await;
+        assert!(matches!(missing, Err(EngineError::Invalid(_))));
+        engine.undo().await.unwrap();
+        assert_eq!(said(&engine), "on coupe ceci mais pas cela");
+    }
+
+    #[tokio::test]
+    async fn occurrences_can_be_picked_one_by_one_all_or_by_position() {
+        let engine = engine_saying("oui non oui non oui").await;
+        let cut = |occurrence| {
+            engine.cut_text(CutTextRequest {
+                text: "oui".into(),
+                occurrence,
+            })
+        };
+        assert!(cut(Occurrence::Nth(4)).await.is_err());
+        cut(Occurrence::Nth(2)).await.unwrap();
+        assert_eq!(said(&engine), "oui non non oui");
+        // The "oui" said at 2 s in the source; the first one is at 0 s.
+        cut(Occurrence::Near {
+            asset_id: "a".into(),
+            start: 2.0,
+            end: 2.4,
+        })
+        .await
+        .unwrap();
+        assert_eq!(said(&engine), "oui non non");
+        cut(Occurrence::All).await.unwrap();
+        assert_eq!(said(&engine), "non non");
+    }
+
+    #[tokio::test]
+    async fn hesitations_and_retakes_are_removed_or_just_listed() {
+        let engine = engine_saying("Euh on va. On va voir ça. Hum voilà.").await;
+        let dry = engine.remove_fillers(true).await.unwrap();
+        assert!(!dry.applied);
+        assert_eq!(dry.removed.len(), 2);
+        assert_eq!(said(&engine), "Euh on va. On va voir ça. Hum voilà.");
+
+        engine.remove_fillers(false).await.unwrap();
+        assert_eq!(said(&engine), "on va. On va voir ça. voilà.");
+
+        let retakes = engine.remove_retakes(false).await.unwrap();
+        assert_eq!(retakes.removed.len(), 1);
+        assert_eq!(retakes.removed[0].text, "on va.");
+        assert_eq!(
+            retakes.removed[0].replaced_by.as_deref(),
+            Some("On va voir ça.")
+        );
+        assert_eq!(said(&engine), "On va voir ça. voilà.");
+        assert_eq!(
+            engine.edl_summary().history.undo.as_deref(),
+            Some("Remove 1 retake")
+        );
+    }
+
+    #[tokio::test]
+    async fn text_editing_needs_speech() {
+        let engine = engine_with_asset();
+        assert!(matches!(
+            engine.remove_fillers(true).await,
+            Err(EngineError::Invalid(_))
+        ));
     }
 
     #[tokio::test]

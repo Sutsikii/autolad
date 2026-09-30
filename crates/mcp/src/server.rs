@@ -16,7 +16,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent::{AgentEvent, AgentLink, AgentPhase};
 use crate::base64;
-use crate::engine::{BuildEdlRequest, Engine, FrameTarget, RenderRequest, TranscribeRequest};
+use crate::engine::{
+    BuildEdlRequest, CutTextRequest, Engine, FrameTarget, Occurrence, RenderRequest,
+    TranscribeRequest,
+};
 use crate::error::EngineError;
 
 /// Adapter between MCP and the engine. Cheap to clone.
@@ -123,6 +126,7 @@ fn op_step(ops: &[EdlOpInput]) -> Step {
         Some(EdlOpInput::Move { from, .. }) => (format!("Moving clip {}", from + 1), Some(*from)),
         Some(EdlOpInput::Insert { index, .. }) => ("Adding a clip".to_owned(), Some(*index)),
         Some(EdlOpInput::Clear) => ("Clearing the timeline".to_owned(), None),
+        Some(EdlOpInput::RemoveRange { .. }) => ("Removing a passage".to_owned(), None),
         None => ("Editing the timeline".to_owned(), None),
     };
     let mut step = Step::new("edit_edl", label, true);
@@ -205,6 +209,9 @@ enum EdlOpInput {
     },
     /// Remove every cut.
     Clear,
+    /// Remove the source range start..end (seconds) of an asset wherever the EDL plays it,
+    /// trimming or splitting the cuts it overlaps. No index needed.
+    RemoveRange { asset: String, start: f64, end: f64 },
 }
 
 impl From<EdlOpInput> for EdlOp {
@@ -226,6 +233,11 @@ impl From<EdlOpInput> for EdlOp {
                 end,
             },
             EdlOpInput::Clear => EdlOp::Clear,
+            EdlOpInput::RemoveRange { asset, start, end } => EdlOp::RemoveRange {
+                asset: AssetId(asset),
+                start,
+                end,
+            },
         }
     }
 }
@@ -234,6 +246,23 @@ impl From<EdlOpInput> for EdlOp {
 struct EditEdlArgs {
     /// Edits applied in order. If any is invalid, none is applied.
     ops: Vec<EdlOpInput>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct CutTextArgs {
+    /// Words to remove, as the edit transcript says them. Case and punctuation don't matter.
+    text: String,
+    /// Which occurrence to cut when the text is said several times, counting from 1.
+    /// Default 1.
+    occurrence: Option<usize>,
+    /// Cut every occurrence. Default false.
+    all: Option<bool>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct CleanupArgs {
+    /// Only list what would be removed, without changing the EDL. Default false.
+    dry_run: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -394,6 +423,57 @@ impl AutoladServer {
     }
 
     #[tool(
+        description = "Read what the EDIT says (not the sources): its sentences in order, each with its start/end on the edited timeline. Built from the transcripts already computed; lists the clips still needing `transcribe`. Re-read it after cutting to check the result."
+    )]
+    async fn get_edit_transcript(&self) -> Result<CallToolResult, ErrorData> {
+        respond(Ok::<_, EngineError>(self.engine.edit_transcript()))
+    }
+
+    #[tool(
+        description = "Cut a piece of text out of the edit, at word precision: its words are removed from the EDL wherever they are played. Quote the text as get_edit_transcript gives it. Needs word timings; clips without them are transcribed word by word first (can take minutes the first time). Undoable."
+    )]
+    async fn cut_text(
+        &self,
+        Parameters(a): Parameters<CutTextArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let occurrence = if a.all.unwrap_or(false) {
+            Occurrence::All
+        } else {
+            Occurrence::Nth(a.occurrence.unwrap_or(1))
+        };
+        let request = CutTextRequest {
+            text: a.text,
+            occurrence,
+        };
+        let step = Step::new("cut_text", "Cutting a sentence", true);
+        self.run(step, self.engine.cut_text(request)).await
+    }
+
+    #[tool(
+        description = "Remove the hesitation sounds (euh, heu, hum, um, uh, erm…) from the edit, at word precision. Returns each one removed with its former timeline position. Note: whisper leaves out some hesitations, so this may not catch all of them. Undoable."
+    )]
+    async fn remove_fillers(
+        &self,
+        Parameters(a): Parameters<CleanupArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let step = Step::new("remove_fillers", "Removing hesitations", true);
+        let dry_run = a.dry_run.unwrap_or(false);
+        self.run(step, self.engine.remove_fillers(dry_run)).await
+    }
+
+    #[tool(
+        description = "Find the sentences the speaker started over (false starts, repeated sentences) and remove the failed takes, keeping the last attempt. Heuristic: use dry_run=true to review the list (each with the retry that replaces it) before applying. Undoable."
+    )]
+    async fn remove_retakes(
+        &self,
+        Parameters(a): Parameters<CleanupArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let step = Step::new("remove_retakes", "Removing failed takes", true);
+        let dry_run = a.dry_run.unwrap_or(false);
+        self.run(step, self.engine.remove_retakes(dry_run)).await
+    }
+
+    #[tool(
         description = "Undo the last change to the EDL, whether you or the user made it. Returns what was undone and the new EDL. get_edl tells what undo/redo would do next."
     )]
     async fn undo(&self) -> Result<CallToolResult, ErrorData> {
@@ -532,7 +612,8 @@ AutoLad edits videos locally. Typical workflow:
 1. import_media for each rush (returns an asset id).
 2. detect_silences to inspect pauses, and/or transcribe to read what is said.
 3. build_silence_edl to cut the silences out automatically (creates the EDL, the ordered list of kept ranges).
-4. Look at the result: get_edl for the cut list, preview_frame to see any moment of the source or of the edit.
+4. Look at the result: get_edl for the cut list, get_edit_transcript to read what the edit says, preview_frame to see any moment of the source or of the edit.
+   Edit by text: cut_text removes a sentence or words, remove_fillers the hesitations, remove_retakes the failed takes (all at word precision).
 5. Refine with edit_edl (delete / trim / split / move / insert cuts; a batch is applied atomically). Any change can be reverted with undo (and redo), including the user's.
 6. render_start (use draft=true for a quick low-res check), poll render_status until state is 'done', or render_cancel.
 Times are in seconds. Cut indices refer to get_edl. Use save_project to persist your work."
