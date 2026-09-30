@@ -70,6 +70,7 @@ fn asset(id: &str, path: &Path) -> Asset {
         id: AssetId(id.into()),
         path: path.to_path_buf(),
         duration: 3.0,
+        has_audio: true,
     }
 }
 

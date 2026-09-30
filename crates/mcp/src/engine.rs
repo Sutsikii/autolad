@@ -62,6 +62,8 @@ pub struct AssetSummary {
     pub id: String,
     pub path: PathBuf,
     pub duration: f64,
+    /// `false` for silent clips: nothing to detect, transcribe or draw as a waveform.
+    pub has_audio: bool,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub fps: Option<f64>,
@@ -250,9 +252,9 @@ impl Engine {
         let info = FfprobeProbe::new(self.binaries.clone())
             .probe_file(&path)
             .await?;
-        if !info.has_video || !info.has_audio {
+        if !info.has_video {
             return Err(EngineError::Invalid(
-                "only files with both a video and an audio track are supported for now".into(),
+                "this file has no video track: only videos can be imported".into(),
             ));
         }
 
@@ -271,6 +273,7 @@ impl Engine {
                 id,
                 path,
                 duration: info.duration,
+                has_audio: info.has_audio,
             },
             width: info.width,
             height: info.height,
@@ -307,6 +310,19 @@ impl Engine {
             .ok_or_else(|| EngineError::UnknownAsset(id.to_owned()))
     }
 
+    /// Like `entry`, for operations that read the audio track.
+    fn entry_with_audio(&self, id: &str, doing: &str) -> Result<AssetEntry, EngineError> {
+        let entry = self.entry(id)?;
+        if entry.asset.has_audio {
+            Ok(entry)
+        } else {
+            Err(EngineError::Invalid(format!(
+                "asset {id} has no audio track, so there is nothing to {doing}; \
+                 add it to the timeline with edit_edl (insert) instead"
+            )))
+        }
+    }
+
     // ---- Editor media (cached by asset id) ----------------------------------
 
     /// Playback proxy of an asset, built on first use.
@@ -338,7 +354,7 @@ impl Engine {
     }
 
     pub async fn ensure_waveform(&self, asset_id: &str) -> Result<Waveform, EngineError> {
-        let entry = self.entry(asset_id)?;
+        let entry = self.entry_with_audio(asset_id, "draw a waveform for")?;
         let output = self.cache_file("waves", asset_id, "bin").await?;
         if !is_file(&output).await {
             build_waveform(&self.binaries, &entry.asset.path, &output).await?;
@@ -371,7 +387,7 @@ impl Engine {
         noise_db: Option<f64>,
         min_silence: Option<f64>,
     ) -> Result<SilenceReport, EngineError> {
-        let entry = self.entry(asset_id)?;
+        let entry = self.entry_with_audio(asset_id, "detect silences in")?;
         let noise_db = noise_db.unwrap_or(DEFAULT_NOISE_DB);
         let min_silence = min_silence.unwrap_or(DEFAULT_MIN_SILENCE);
         if !(-90.0..0.0).contains(&noise_db) {
@@ -415,7 +431,7 @@ impl Engine {
         &self,
         req: TranscribeRequest,
     ) -> Result<TranscriptReport, EngineError> {
-        let entry = self.entry(&req.asset_id)?;
+        let entry = self.entry_with_audio(&req.asset_id, "transcribe")?;
         let model = match req.model.as_deref() {
             None => WhisperModel::default(),
             Some(id) => WhisperModel::from_id(id).ok_or_else(|| {
@@ -737,6 +753,7 @@ fn summarize_asset(e: &AssetEntry) -> AssetSummary {
         id: e.asset.id.0.clone(),
         path: e.asset.path.clone(),
         duration: e.asset.duration,
+        has_audio: e.asset.has_audio,
         width: e.width,
         height: e.height,
         fps: e.fps,
@@ -841,6 +858,7 @@ mod tests {
                 id: AssetId("a".into()),
                 path: PathBuf::from("C:/rushes/a.mp4"),
                 duration: 10.0,
+                has_audio: true,
             },
             width: w,
             height: h,

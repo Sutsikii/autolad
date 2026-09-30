@@ -177,12 +177,21 @@ export type AgentPhase =
  * branch on `kind` without parsing text.
  */
 export type AppError = { kind: "invalidInput"; message: string } | { kind: "internal"; message: string }
-export type Asset = { id: AssetId; path: string; duration: number }
+export type Asset = { id: AssetId; path: string; duration: number; 
+/**
+ * Screen recordings and silent clips have no audio track. Project files written before
+ * this field existed could only hold assets with sound.
+ */
+has_audio?: boolean }
 /**
  * Stable identifier of an imported asset (content hash, see cache rules in CLAUDE.md).
  */
 export type AssetId = string
-export type AssetSummary = { id: string; path: string; duration: number; width: number | null; height: number | null; fps: number | null }
+export type AssetSummary = { id: string; path: string; duration: number; 
+/**
+ * `false` for silent clips: nothing to detect, transcribe or draw as a waveform.
+ */
+has_audio: boolean; width: number | null; height: number | null; fps: number | null }
 /**
  * One kept portion of a source asset.
  */

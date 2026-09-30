@@ -152,11 +152,13 @@ mod tests {
                 id: id("a"),
                 path: PathBuf::from("a.mp4"),
                 duration: 10.0,
+                has_audio: true,
             },
             Asset {
                 id: id("b"),
                 path: PathBuf::from("b.mp4"),
                 duration: 5.0,
+                has_audio: true,
             },
         ]
     }

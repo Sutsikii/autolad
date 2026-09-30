@@ -33,7 +33,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const asset = await call(api.importMedia(path));
       const known = get().assets.some((a) => a.id === asset.id);
       set((s) => ({ assets: known ? s.assets : [...s.assets, asset], selectedId: asset.id }));
-      void useMediaStore.getState().prepare(asset.id);
+      void useMediaStore.getState().prepare(asset);
       notify.info(known ? `${fileName(path)} is already imported` : `Imported ${fileName(path)}`);
     } catch (error) {
       notify.error(messageOf(error));

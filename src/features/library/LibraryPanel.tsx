@@ -13,7 +13,8 @@ import { useFileDrop } from "./useFileDrop";
 function describe(asset: AssetSummary): string {
   const size = asset.width && asset.height ? `${asset.width}×${asset.height}` : "";
   const fps = asset.fps ? `${Math.round(asset.fps)} fps` : "";
-  return [formatTimecode(asset.duration), size, fps].filter(Boolean).join(" · ");
+  const sound = asset.has_audio ? "" : "no audio";
+  return [formatTimecode(asset.duration), size, fps, sound].filter(Boolean).join(" · ");
 }
 
 export function LibraryPanel() {

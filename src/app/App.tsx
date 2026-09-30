@@ -42,7 +42,9 @@ export function App() {
   useHydrate();
   useShortcuts();
   useAgentEvents();
-  const selectedAssetId = useLibraryStore((s) => s.selectedId);
+  const selectedAsset = useLibraryStore(
+    (s) => s.assets.find((a) => a.id === s.selectedId) ?? null,
+  );
 
   return (
     <div className="flex h-screen select-none flex-col bg-black text-neutral-200">
@@ -50,7 +52,7 @@ export function App() {
       <div className="flex min-h-0 flex-1 gap-px">
         <LibraryPanel />
         <PreviewPanel />
-        <AutomationPanel assetId={selectedAssetId} />
+        <AutomationPanel asset={selectedAsset} />
       </div>
       <div className="h-px shrink-0" />
       <TimelinePanel />

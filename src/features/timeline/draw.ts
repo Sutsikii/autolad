@@ -27,6 +27,8 @@ const COLORS = {
   videoSelected: "#5b95d1",
   audio: "#3f8f6b",
   audioSelected: "#5bbd93",
+  audioMuted: "#2f2f2f",
+  mutedText: "#8a8a8a",
   wave: "#bdeed6",
   waveSelected: "#ffffff",
   selectedTint: "rgba(120, 180, 255, 0.28)",
@@ -70,7 +72,10 @@ function drawClips(ctx: CanvasRenderingContext2D, s: DrawState): void {
     const w = Math.max(1, x1 - left - 1);
     const media = s.media[cut.asset];
     drawClip(ctx, TRACKS.video, left, w, isSelected ? COLORS.videoSelected : COLORS.video);
-    drawClip(ctx, TRACKS.audio, left, w, isSelected ? COLORS.audioSelected : COLORS.audio);
+    const silent = media?.hasAudio === false;
+    const soundColor = isSelected ? COLORS.audioSelected : COLORS.audio;
+    drawClip(ctx, TRACKS.audio, left, w, silent ? COLORS.audioMuted : soundColor);
+    if (silent && w > 70) mutedLabel(ctx, left, w);
     if (media?.thumbnails) drawThumbnails(ctx, cut, media.thumbnails, x0, left, left + w, s);
     if (media?.peaks && media.peaksPerSecond) {
       drawWaveform(ctx, cut, media.peaks, media.peaksPerSecond, x0, left, left + w, s, isSelected);
@@ -142,6 +147,20 @@ function drawWaveform(
     const half = Math.max(0.5, (peak / 255) * (h / 2 - 2));
     ctx.fillRect(x, middle - half, 1, half * 2);
   }
+}
+
+/** Says why the audio track of a clip is empty instead of leaving an unexplained dark block. */
+function mutedLabel(ctx: CanvasRenderingContext2D, x: number, w: number): void {
+  const { y, h } = TRACKS.audio;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  ctx.fillStyle = COLORS.mutedText;
+  ctx.font = "11px system-ui, sans-serif";
+  ctx.textBaseline = "middle";
+  ctx.fillText("no audio", x + 8, y + h / 2);
+  ctx.restore();
 }
 
 function drawClip(

@@ -37,6 +37,14 @@ pub struct Asset {
     pub id: AssetId,
     pub path: PathBuf,
     pub duration: f64,
+    /// Screen recordings and silent clips have no audio track. Project files written before
+    /// this field existed could only hold assets with sound.
+    #[serde(default = "with_audio")]
+    pub has_audio: bool,
+}
+
+fn with_audio() -> bool {
+    true
 }
 
 /// One kept portion of a source asset.

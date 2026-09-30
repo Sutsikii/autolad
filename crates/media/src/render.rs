@@ -33,8 +33,8 @@ impl FfmpegRenderer {
         progress: ProgressFn<'_>,
     ) -> Result<(), MediaError> {
         validate(options)?;
-        let (inputs, cuts) = place_cuts(assets, edl)?;
-        let graph = build_filter_graph(&cuts, inputs.len(), options)?;
+        let (inputs, audio, cuts) = place_cuts(assets, edl)?;
+        let graph = build_filter_graph(&cuts, &audio, options)?;
 
         // A graph with hundreds of cuts overflows the Windows command line, so it goes in a file.
         let graph_path = graph_file_path(output);
@@ -151,10 +151,12 @@ fn validate(o: &RenderOptions) -> Result<(), MediaError> {
 }
 
 /// Assigns each distinct asset one `-i` input, in order of first use.
+/// Inputs in order of first use, whether each has audio, and the cuts pointing at them.
+#[allow(clippy::type_complexity)]
 fn place_cuts<'a>(
     assets: &'a [Asset],
     edl: &Edl,
-) -> Result<(Vec<&'a Path>, Vec<PlacedCut>), MediaError> {
+) -> Result<(Vec<&'a Path>, Vec<bool>, Vec<PlacedCut>), MediaError> {
     let mut order: Vec<&Asset> = Vec::new();
     let mut cuts = Vec::with_capacity(edl.cuts.len());
     for cut in &edl.cuts {
@@ -174,7 +176,9 @@ fn place_cuts<'a>(
             range: cut.range,
         });
     }
-    Ok((order.iter().map(|a| a.path.as_path()).collect(), cuts))
+    let paths = order.iter().map(|a| a.path.as_path()).collect();
+    let audio = order.iter().map(|a| a.has_audio).collect();
+    Ok((paths, audio, cuts))
 }
 
 fn graph_file_path(output: &Path) -> PathBuf {
@@ -194,6 +198,7 @@ mod tests {
             id: AssetId(id.into()),
             path: PathBuf::from(format!("{id}.mp4")),
             duration: 10.0,
+            has_audio: true,
         }
     }
 
@@ -210,7 +215,7 @@ mod tests {
         let edl = Edl {
             cuts: vec![cut("b", 0.0, 1.0), cut("a", 0.0, 1.0), cut("b", 2.0, 3.0)],
         };
-        let (inputs, cuts) = place_cuts(&assets, &edl).unwrap();
+        let (inputs, _, cuts) = place_cuts(&assets, &edl).unwrap();
         assert_eq!(inputs, vec![Path::new("b.mp4"), Path::new("a.mp4")]);
         let idx: Vec<usize> = cuts.iter().map(|c| c.input).collect();
         assert_eq!(idx, vec![0, 1, 0]);

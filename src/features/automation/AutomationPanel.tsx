@@ -1,5 +1,5 @@
 import { useTimelineStore } from "@/features/timeline/store";
-import { api, call } from "@/ipc";
+import { api, call, type AssetSummary } from "@/ipc";
 import { messageOf, notify } from "@/shared/notify";
 import { Panel } from "@/shared/ui/Panel";
 import { btn, btnPrimary, input } from "@/shared/ui/styles";
@@ -13,10 +13,12 @@ const FIELDS = [
 
 interface Props {
   /** Asset the silence removal runs on. */
-  assetId: string | null;
+  asset: AssetSummary | null;
 }
 
-export function AutomationPanel({ assetId }: Props) {
+export function AutomationPanel({ asset }: Props) {
+  const assetId = asset?.id ?? null;
+  const silent = asset !== null && !asset.has_audio;
   const settings = useAutomationStore((s) => s.settings);
   const noiseDb = useAutomationStore((s) => s.noiseDb);
   const running = useAutomationStore((s) => s.running);
@@ -83,7 +85,7 @@ export function AutomationPanel({ assetId }: Props) {
           <button
             data-agent="auto-cut"
             className={`${btnPrimary} flex-1`}
-            disabled={!assetId || running}
+            disabled={!assetId || silent || running}
             onClick={() => void run()}
           >
             {running ? "Analysing…" : "Remove silences"}
@@ -93,11 +95,17 @@ export function AutomationPanel({ assetId }: Props) {
           </button>
         </div>
         <p className="text-[11px] leading-relaxed text-neutral-500">
-          {assetId
-            ? "Replaces the timeline with the speech parts of the selected clip."
-            : "Select a clip in the Project panel first."}
+          {hint(asset)}
         </p>
       </div>
     </Panel>
   );
+}
+
+function hint(asset: AssetSummary | null): string {
+  if (!asset) return "Select a clip in the Project panel first.";
+  if (!asset.has_audio) {
+    return "This clip has no audio track, so there is no silence to remove. Double-click it in the Project panel to add it to the timeline.";
+  }
+  return "Replaces the timeline with the speech parts of the selected clip.";
 }

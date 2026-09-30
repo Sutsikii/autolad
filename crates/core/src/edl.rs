@@ -80,6 +80,7 @@ mod tests {
             id: AssetId("a".into()),
             path: PathBuf::from("a.mp4"),
             duration,
+            has_audio: true,
         }
     }
 

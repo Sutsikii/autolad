@@ -75,6 +75,7 @@ mod tests {
                 id: id.clone(),
                 path: PathBuf::from("C:/rushes/a.mp4"),
                 duration: 12.5,
+                has_audio: true,
             },
             width: Some(1920),
             height: Some(1080),

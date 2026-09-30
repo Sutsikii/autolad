@@ -10,7 +10,7 @@ export async function refreshProject(): Promise<void> {
   try {
     const status = await call(api.projectStatus());
     useLibraryStore.getState().setAssets(status.assets);
-    for (const asset of status.assets) void useMediaStore.getState().prepare(asset.id);
+    for (const asset of status.assets) void useMediaStore.getState().prepare(asset);
     useTimelineStore.getState().setEdl(status.edl);
     useProjectStore.getState().setFile(status.project_file);
   } catch (error) {

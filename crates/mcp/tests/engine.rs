@@ -65,6 +65,34 @@ fn make_clip(path: &Path, seconds: u32, size: &str) {
     assert!(status.success());
 }
 
+/// Test clip with no audio track at all (like a screen recording).
+fn make_silent_clip(path: &Path, seconds: u32, size: &str) {
+    let b = binaries();
+    let status = Command::new(&b.ffmpeg)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+        ])
+        .arg(format!("testsrc=size={size}:rate=25:duration={seconds}"))
+        .args([
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "yuv420p",
+        ])
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
 fn silence_request(asset_id: &str) -> BuildEdlRequest {
     BuildEdlRequest {
         asset_id: asset_id.to_owned(),
@@ -421,4 +449,115 @@ async fn bad_inputs_give_actionable_errors() {
         engine.render_status("render-999"),
         Err(EngineError::UnknownJob(_))
     ));
+}
+
+#[tokio::test]
+async fn a_clip_without_sound_can_be_imported_edited_and_rendered() {
+    let dir = scratch("silent");
+    let silent = dir.join("screen.mp4");
+    let talk = dir.join("talk.mp4");
+    make_silent_clip(&silent, 4, "320x240");
+    make_clip(&talk, 3, "320x240");
+    let engine = engine(&dir);
+
+    let imported = engine.import_media(&silent).await.unwrap().asset;
+    assert!(!imported.has_audio);
+    let silent_id = imported.id;
+
+    // Audio analysis explains itself and points at the alternative.
+    for error in [
+        engine
+            .detect_silences(&silent_id, None, None)
+            .await
+            .unwrap_err(),
+        engine
+            .build_silence_edl(silence_request(&silent_id))
+            .await
+            .unwrap_err(),
+    ] {
+        let EngineError::Invalid(message) = error else {
+            panic!("expected an Invalid error");
+        };
+        assert!(message.contains("no audio track"), "{message}");
+        assert!(message.contains("edit_edl"), "{message}");
+    }
+    let transcribe = engine
+        .transcribe(TranscribeRequest {
+            asset_id: silent_id.clone(),
+            language: None,
+            model: None,
+            word_timestamps: false,
+        })
+        .await;
+    assert!(matches!(transcribe, Err(EngineError::Invalid(_))));
+    assert!(matches!(
+        engine.ensure_waveform(&silent_id).await,
+        Err(EngineError::Invalid(_))
+    ));
+
+    // It can still be cut by hand, next to a clip that has sound, and rendered.
+    let talk_id = engine.import_media(&talk).await.unwrap().asset.id;
+    assert!(engine.project_status().assets.iter().any(|a| a.has_audio));
+    engine
+        .edit_edl(vec![
+            EdlOp::Insert {
+                index: 0,
+                asset: AssetId(silent_id.clone()),
+                start: 0.0,
+                end: 2.0,
+            },
+            EdlOp::Insert {
+                index: 1,
+                asset: AssetId(talk_id),
+                start: 0.0,
+                end: 3.0,
+            },
+        ])
+        .await
+        .unwrap();
+
+    let out = dir.join("mixed.mp4");
+    let job = engine
+        .render_start(RenderRequest {
+            output: out.clone(),
+            draft: true,
+            width: None,
+            height: None,
+            fps: None,
+            overwrite: false,
+        })
+        .await
+        .unwrap();
+    let status = wait_for_job(&engine, &job).await;
+    assert!(matches!(status.state, JobState::Done { .. }), "{status:?}");
+    let info = FfprobeProbe::new(binaries())
+        .probe_file(&out)
+        .await
+        .unwrap();
+    assert!(info.has_audio, "the export keeps a (silent) audio track");
+    assert!((info.duration - 5.0).abs() < 0.3, "{}", info.duration);
+}
+
+#[tokio::test]
+async fn a_file_without_video_is_still_refused() {
+    let dir = scratch("audio-only");
+    let audio = dir.join("tone.m4a");
+    let status = Command::new(binaries().ffmpeg)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+        ])
+        .arg("sine=frequency=440:duration=2")
+        .args(["-c:a", "aac"])
+        .arg(&audio)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let error = engine(&dir).import_media(&audio).await.unwrap_err();
+    assert!(matches!(error, EngineError::Invalid(m) if m.contains("no video track")));
 }

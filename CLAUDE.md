@@ -161,10 +161,12 @@ UPDATE_BINDINGS=1 cargo test -p autolad bindings   # regenerate src/ipc/bindings
 
 - Premier cas d'usage du MVP : le moteur couvre les silences d'une face cam ; highlights et templates restent à décider.
 - Détection de scènes et assemblage multi-rushes évolué (le rendu accepte déjà plusieurs assets).
-- Assets sans piste audio ou sans piste vidéo : refusés à l'import pour l'instant.
+- Fichiers audio seul (sans piste vidéo) : refusés à l'import pour l'instant.
 - Renouvellement du tag BtbN dans `fetch-ffmpeg.ps1` quand il est purgé (mettre à jour tag, nom de fichier et SHA-256 ensemble).
 
 ## Décisions prises
+
+- Clips sans piste audio (captures d'écran…) : acceptés (`Asset.has_audio`). Pas de silences/transcription/forme d'onde pour eux (erreur explicite qui renvoie vers `edit_edl insert`), piste A1 marquée « no audio », et au rendu un silence est généré (`anullsrc`) pour garder un flux audio par cut dans le `concat`.
 
 - Fichier projet : JSON versionné (`version: 1`), écrit atomiquement, autosauvegardé une fois lié par `save_project`. L'UI et l'agent partagent le même fichier lié ; « Nouveau » le délie (plus aucune écriture vers l'ancien fichier).
 - Modèle Whisper par défaut : `small` q5_1. Backend GPU : Vulkan.

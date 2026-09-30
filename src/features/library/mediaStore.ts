@@ -14,6 +14,8 @@ export interface ThumbnailTiles {
 
 /** What the editor shows instead of the source file. Each part appears as soon as it is ready. */
 export interface AssetMedia {
+  /** `false` for silent clips: the timeline shows no waveform for them. */
+  hasAudio?: boolean;
   proxyUrl?: string;
   thumbnails?: ThumbnailTiles;
   /** One byte (0..255) per `1 / peaksPerSecond` seconds. */
@@ -25,7 +27,7 @@ interface MediaState {
   byAsset: Record<string, AssetMedia>;
   /** Assets whose proxy is still being encoded. */
   proxiesPending: number;
-  prepare: (assetId: string) => Promise<void>;
+  prepare: (asset: { id: string; has_audio: boolean }) => Promise<void>;
 }
 
 const started = new Set<string>();
@@ -85,13 +87,15 @@ export const useMediaStore = create<MediaState>((set) => {
   return {
     byAsset: {},
     proxiesPending: 0,
-    prepare: async (assetId) => {
+    prepare: async ({ id: assetId, has_audio: hasAudio }) => {
       if (started.has(assetId)) return;
       started.add(assetId);
+      patch(assetId, { hasAudio });
       await Promise.all([
         proxy(assetId).catch(report("Preview")),
         thumbnails(assetId).catch(report("Thumbnails")),
-        waveform(assetId).catch(report("Waveform")),
+        // A silent clip has no audio to measure.
+        hasAudio ? waveform(assetId).catch(report("Waveform")) : Promise.resolve(),
       ]);
     },
   };

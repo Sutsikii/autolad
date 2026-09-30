@@ -26,6 +26,7 @@ mod tests {
             id: AssetId("a".into()),
             path: PathBuf::from("a.mp4"),
             duration: 10.0,
+            has_audio: true,
         }
     }
 
