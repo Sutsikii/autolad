@@ -50,6 +50,7 @@ pub struct Engine {
 // ---- Outputs ---------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct AssetSummary {
     pub id: String,
     pub path: PathBuf,
@@ -67,6 +68,7 @@ pub struct ImportedAsset {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct CutSummary {
     pub index: usize,
     pub asset: String,
@@ -78,12 +80,14 @@ pub struct CutSummary {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct EdlSummary {
     pub cuts: Vec<CutSummary>,
     pub total_duration: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct ProjectStatus {
     pub assets: Vec<AssetSummary>,
     pub edl: EdlSummary,
@@ -102,6 +106,7 @@ pub struct SilenceReport {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct BuildReport {
     pub edl: EdlSummary,
     pub source_duration: f64,

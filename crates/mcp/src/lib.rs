@@ -3,7 +3,7 @@
 //! `engine` holds all behaviour and is tested directly; `server` is a thin rmcp
 //! adapter (argument parsing, error mapping) on top of it.
 
-mod base64;
+pub mod base64;
 pub mod engine;
 pub mod error;
 pub mod jobs;

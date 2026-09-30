@@ -22,6 +22,7 @@ const CANCEL_CLEANUP_DELAY: Duration = Duration::from_millis(400);
 const PROGRESS_SCALE: f64 = 1000.0;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum JobState {
     Running,
@@ -31,6 +32,7 @@ pub enum JobState {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct JobStatus {
     pub id: String,
     pub output: PathBuf,

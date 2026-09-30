@@ -12,6 +12,7 @@ const DURATION_TOLERANCE: f64 = 0.05;
 /// One edit. Indices refer to the EDL as it is when the op runs, so a batch is
 /// applied in order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum EdlOp {
     /// Removes the cut at `index`.
