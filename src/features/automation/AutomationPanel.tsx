@@ -1,7 +1,6 @@
 import { useTimelineStore } from "@/features/timeline/store";
 import { api, call, type AssetSummary } from "@/ipc";
 import { messageOf, notify } from "@/shared/notify";
-import { Panel } from "@/shared/ui/Panel";
 import { btn, btnPrimary, input } from "@/shared/ui/styles";
 import { useAutomationStore } from "./store";
 
@@ -48,8 +47,7 @@ export function AutomationPanel({ asset }: Props) {
   };
 
   return (
-    <Panel title="Auto-cut" className="w-72 shrink-0">
-      <div className="space-y-4 p-3">
+    <div className="space-y-4 p-3">
         <div>
           <div className="mb-1 flex items-center justify-between text-xs text-neutral-300">
             <label htmlFor="noise">Silence threshold</label>
@@ -97,8 +95,7 @@ export function AutomationPanel({ asset }: Props) {
         <p className="text-[11px] leading-relaxed text-neutral-500">
           {hint(asset)}
         </p>
-      </div>
-    </Panel>
+    </div>
   );
 }
 

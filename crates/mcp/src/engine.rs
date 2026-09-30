@@ -8,7 +8,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use autolad_core::edl::{build_silence_cut_edl, SilenceSettings};
 use autolad_core::edl_edit::{apply_ops, EdlOp};
-use autolad_core::ports::RenderOptions;
+use autolad_core::ports::{RenderOptions, TranscriptSegment};
 use autolad_core::{Asset, AssetId, Edl, TimeRange};
 use autolad_media::frame::extract_frame;
 use autolad_media::hash::hash_file;
@@ -143,6 +143,7 @@ pub struct BuildReport {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct TranscriptEntry {
     pub start: f64,
     pub end: f64,
@@ -150,6 +151,7 @@ pub struct TranscriptEntry {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct TranscriptReport {
     pub asset: String,
     pub model: String,
@@ -474,27 +476,39 @@ impl Engine {
             }
         };
 
-        let full_text = segments
+        Ok(transcript_report(
+            req.asset_id,
+            TranscriptKey {
+                model: model.id().to_owned(),
+                language,
+                word_timestamps: req.word_timestamps,
+            },
+            segments,
+            was_cached,
+        ))
+    }
+
+    /// A transcript already computed for `asset_id` (phrase mode preferred), without starting
+    /// one: the UI shows it as soon as the clip is selected, and never triggers a long job.
+    pub fn find_transcript(&self, asset_id: &str) -> Option<TranscriptReport> {
+        let state = lock(&self.state);
+        let mut found: Vec<(TranscriptKey, &Vec<TranscriptSegment>)> = state
+            .project
+            .transcripts
             .iter()
-            .map(|s| s.text.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
-        Ok(TranscriptReport {
-            asset: req.asset_id,
-            model: model.id().to_owned(),
-            language,
-            word_timestamps: req.word_timestamps,
-            cached: was_cached,
-            segments: segments
-                .into_iter()
-                .map(|s| TranscriptEntry {
-                    start: s.range.start,
-                    end: s.range.end,
-                    text: s.text,
-                })
-                .collect(),
-            full_text,
-        })
+            .filter_map(|(key, segments)| {
+                let (id, rest) = key.split_once(':')?;
+                (id == asset_id).then_some((TranscriptKey::parse(rest)?, segments))
+            })
+            .collect();
+        found.sort_by_key(|(key, _)| key.word_timestamps);
+        let (key, segments) = found.into_iter().next()?;
+        Some(transcript_report(
+            asset_id.to_owned(),
+            key,
+            segments.clone(),
+            true,
+        ))
     }
 
     /// Loads the model once and reuses it: loading takes a while and GPU memory.
@@ -752,6 +766,55 @@ impl Engine {
 
 // ---- Pure helpers ----------------------------------------------------------
 
+/// What distinguishes the transcripts of one asset; stored as `model:language:words` after the
+/// asset id in the project file.
+struct TranscriptKey {
+    model: String,
+    language: String,
+    word_timestamps: bool,
+}
+
+impl TranscriptKey {
+    fn parse(text: &str) -> Option<Self> {
+        let mut parts = text.split(':');
+        let (model, language, words) = (parts.next()?, parts.next()?, parts.next()?);
+        Some(Self {
+            model: model.to_owned(),
+            language: language.to_owned(),
+            word_timestamps: words.parse().ok()?,
+        })
+    }
+}
+
+fn transcript_report(
+    asset: String,
+    key: TranscriptKey,
+    segments: Vec<TranscriptSegment>,
+    cached: bool,
+) -> TranscriptReport {
+    let full_text = segments
+        .iter()
+        .map(|s| s.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    TranscriptReport {
+        asset,
+        model: key.model,
+        language: key.language,
+        word_timestamps: key.word_timestamps,
+        cached,
+        segments: segments
+            .into_iter()
+            .map(|s| TranscriptEntry {
+                start: s.range.start,
+                end: s.range.end,
+                text: s.text,
+            })
+            .collect(),
+        full_text,
+    }
+}
+
 fn summarize_asset(e: &AssetEntry) -> AssetSummary {
     AssetSummary {
         id: e.asset.id.0.clone(),
@@ -924,6 +987,67 @@ mod tests {
         let o = resolve_options(&entry(Some(1000), Some(667), Some(25.0)), &req(true)).unwrap();
         assert_eq!(o.width % 2, 0);
         assert_eq!(o.height % 2, 0);
+    }
+
+    fn segment(start: f64, end: f64, text: &str) -> TranscriptSegment {
+        TranscriptSegment {
+            range: TimeRange::new(start, end).unwrap(),
+            text: text.to_owned(),
+        }
+    }
+
+    fn engine_with_transcripts(stored: &[(&str, Vec<TranscriptSegment>)]) -> Engine {
+        let dummy = PathBuf::from("unused");
+        let engine = Engine::new(
+            Binaries {
+                ffmpeg: dummy.clone(),
+                ffprobe: dummy,
+            },
+            std::env::temp_dir().join("autolad-unit-transcripts"),
+        );
+        for (key, segments) in stored {
+            lock(&engine.state)
+                .project
+                .transcripts
+                .insert((*key).to_owned(), segments.clone());
+        }
+        engine
+    }
+
+    #[test]
+    fn a_stored_transcript_is_found_without_starting_one() {
+        let engine = engine_with_transcripts(&[(
+            "abc:small:fr:false",
+            vec![
+                segment(0.0, 2.0, "Bonjour"),
+                segment(2.0, 4.5, "tout le monde"),
+            ],
+        )]);
+        let report = engine.find_transcript("abc").unwrap();
+        assert_eq!(
+            (report.model.as_str(), report.language.as_str()),
+            ("small", "fr")
+        );
+        assert!(report.cached && !report.word_timestamps);
+        assert_eq!(report.segments.len(), 2);
+        assert_eq!(report.full_text, "Bonjour tout le monde");
+    }
+
+    #[test]
+    fn phrases_are_preferred_over_words_and_other_assets_are_ignored() {
+        let engine = engine_with_transcripts(&[
+            ("abc:small:auto:true", vec![segment(0.0, 0.5, "mot")]),
+            (
+                "abc:small:auto:false",
+                vec![segment(0.0, 2.0, "une phrase")],
+            ),
+            ("abcd:small:auto:false", vec![segment(0.0, 1.0, "autre")]),
+        ]);
+        let report = engine.find_transcript("abc").unwrap();
+        assert_eq!(report.full_text, "une phrase");
+        assert!(engine.find_transcript("zzz").is_none());
+        // An id that merely starts like another one must not match it.
+        assert_eq!(engine.find_transcript("abcd").unwrap().full_text, "autre");
     }
 
     #[test]

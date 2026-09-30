@@ -60,6 +60,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::editor::prepare_proxy,
             commands::editor::prepare_thumbnails,
             commands::editor::prepare_waveform,
+            commands::editor::transcribe,
+            commands::editor::cached_transcript,
             commands::editor::save_project,
             commands::editor::open_project,
             commands::editor::new_project,

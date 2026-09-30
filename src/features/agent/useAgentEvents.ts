@@ -1,5 +1,8 @@
 import { useEffect } from "react";
 import { refreshProject } from "@/app/refreshProject";
+import { useSidebarStore } from "@/app/sidebarStore";
+import { useLibraryStore } from "@/features/library/store";
+import { useTranscriptStore } from "@/features/transcript/store";
 import { useTimelineStore } from "@/features/timeline/store";
 import { events } from "@/ipc";
 import { useAgentStore } from "./store";
@@ -19,6 +22,8 @@ export function useAgentEvents(): void {
         .listen(({ payload }) => {
           const agent = useAgentStore.getState();
           if (payload.phase === "started") {
+            // The transcript tab must be visible for the cursor to have something to go to.
+            if (payload.tool === "transcribe") useSidebarStore.getState().setTab("transcript");
             const target = resolveTarget(payload);
             if (target) agent.moveTo(target, payload.label);
             return;
@@ -29,6 +34,9 @@ export function useAgentEvents(): void {
           }
           agent.click();
           if (payload.changes_project) void refreshProject();
+          if (payload.tool === "transcribe") {
+            void useTranscriptStore.getState().loadStored(useLibraryStore.getState().assets);
+          }
           if (payload.tool === "preview_frame" && payload.time !== null) {
             useTimelineStore.getState().seek(payload.time);
           }

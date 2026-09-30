@@ -15,6 +15,8 @@ export type {
   ProjectStatus,
   SilenceSettings,
   TimeRange,
+  TranscriptEntry,
+  TranscriptReport,
 } from "./bindings";
 
 /** Unwraps a command result: the error message becomes a thrown `Error`. */

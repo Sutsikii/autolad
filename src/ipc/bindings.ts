@@ -93,6 +93,29 @@ async prepareWaveform(assetId: string) : Promise<Result<WaveformPeaks, AppError>
 }
 },
 /**
+ * Transcribes an asset (local Whisper). The first use of a model downloads it, so this can
+ * take minutes; a transcript already computed comes back at once.
+ */
+async transcribe(assetId: string, language: string | null, model: string | null) : Promise<Result<TranscriptReport, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("transcribe", { assetId, language, model }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The transcript of an asset if one exists, without starting a transcription.
+ */
+async cachedTranscript(assetId: string) : Promise<Result<TranscriptReport | null, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("cached_transcript", { assetId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Writes the project to `path` and keeps that file up to date from now on.
  */
 async saveProject(path: string) : Promise<Result<string, AppError>> {
@@ -274,6 +297,8 @@ step: number; tiles: number; tile_width: number; tile_height: number }
  * Half-open interval `[start, end)` in seconds on a source timeline.
  */
 export type TimeRange = { start: number; end: number }
+export type TranscriptEntry = { start: number; end: number; text: string }
+export type TranscriptReport = { asset: string; model: string; language: string; word_timestamps: boolean; cached: boolean; segments: TranscriptEntry[]; full_text: string }
 /**
  * One byte per `1 / peaks_per_second` seconds, base64 encoded (a few tens of KB).
  */

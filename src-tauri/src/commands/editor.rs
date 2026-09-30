@@ -5,7 +5,7 @@ use autolad_core::edl_edit::EdlOp;
 use autolad_mcp::base64;
 use autolad_mcp::engine::{
     AssetSummary, BuildEdlRequest, EdlSummary, FrameTarget, OpenReport, ProjectStatus,
-    RenderRequest, ThumbnailStrip,
+    RenderRequest, ThumbnailStrip, TranscribeRequest, TranscriptReport,
 };
 use autolad_mcp::jobs::JobStatus;
 use serde::Serialize;
@@ -113,6 +113,35 @@ pub async fn prepare_waveform(
         peaks_per_second: waveform.peaks_per_second,
         base64: base64::encode(&peaks),
     })
+}
+
+/// Transcribes an asset (local Whisper). The first use of a model downloads it, so this can
+/// take minutes; a transcript already computed comes back at once.
+#[tauri::command]
+#[specta::specta]
+pub async fn transcribe(
+    state: State<'_, AppState>,
+    asset_id: String,
+    language: Option<String>,
+    model: Option<String>,
+) -> Result<TranscriptReport, AppError> {
+    let request = TranscribeRequest {
+        asset_id,
+        language,
+        model,
+        word_timestamps: false,
+    };
+    Ok(state.engine()?.transcribe(request).await?)
+}
+
+/// The transcript of an asset if one exists, without starting a transcription.
+#[tauri::command]
+#[specta::specta]
+pub fn cached_transcript(
+    state: State<'_, AppState>,
+    asset_id: String,
+) -> Result<Option<TranscriptReport>, AppError> {
+    Ok(state.engine()?.find_transcript(&asset_id))
 }
 
 /// Writes the project to `path` and keeps that file up to date from now on.

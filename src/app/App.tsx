@@ -1,6 +1,5 @@
 import { AgentCursor } from "@/features/agent/AgentCursor";
 import { useAgentEvents } from "@/features/agent/useAgentEvents";
-import { AutomationPanel } from "@/features/automation/AutomationPanel";
 import { usePing } from "@/features/automation/usePing";
 import { ExportControls } from "@/features/export/ExportControls";
 import { LibraryPanel } from "@/features/library/LibraryPanel";
@@ -10,6 +9,7 @@ import { PreviewPanel } from "@/features/preview/PreviewPanel";
 import { TimelinePanel } from "@/features/timeline/TimelinePanel";
 import { useNotice } from "@/shared/notify";
 import { cn } from "@/shared/lib/utils";
+import { SidePanel } from "./SidePanel";
 import { useHydrate } from "./useHydrate";
 import { useShortcuts } from "./useShortcuts";
 
@@ -52,7 +52,7 @@ export function App() {
       <div className="flex min-h-0 flex-1 gap-px">
         <LibraryPanel />
         <PreviewPanel />
-        <AutomationPanel asset={selectedAsset} />
+        <SidePanel asset={selectedAsset} />
       </div>
       <div className="h-px shrink-0" />
       <TimelinePanel />
