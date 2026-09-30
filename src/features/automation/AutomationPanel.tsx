@@ -81,6 +81,7 @@ export function AutomationPanel({ assetId }: Props) {
 
         <div className="flex gap-2 pt-1">
           <button
+            data-agent="auto-cut"
             className={`${btnPrimary} flex-1`}
             disabled={!assetId || running}
             onClick={() => void run()}

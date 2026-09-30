@@ -1,7 +1,8 @@
 //! rmcp adapter: parses tool arguments, calls the [`Engine`], maps errors.
 //! No editing logic lives here.
 
-use std::path::PathBuf;
+use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use autolad_core::edl::SilenceSettings;
@@ -13,6 +14,7 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler, ServiceExt
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::agent::{AgentEvent, AgentLink, AgentPhase};
 use crate::base64;
 use crate::engine::{BuildEdlRequest, Engine, FrameTarget, RenderRequest, TranscribeRequest};
 use crate::error::EngineError;
@@ -21,14 +23,111 @@ use crate::error::EngineError;
 #[derive(Clone)]
 pub struct AutoladServer {
     engine: Arc<Engine>,
+    /// Set when a UI is watching: it is told what the agent does, and given time to show it.
+    link: Option<AgentLink>,
 }
 
 impl AutoladServer {
     pub fn new(engine: Engine) -> Self {
-        Self {
-            engine: Arc::new(engine),
+        Self::shared(Arc::new(engine), None)
+    }
+
+    /// Serves an engine that something else (the desktop app) also uses.
+    pub fn shared(engine: Arc<Engine>, link: Option<AgentLink>) -> Self {
+        Self { engine, link }
+    }
+
+    fn announce(&self, step: &Step, phase: AgentPhase) {
+        if let Some(link) = &self.link {
+            (link.listener)(AgentEvent {
+                tool: step.tool.to_owned(),
+                phase,
+                label: step.label.clone(),
+                index: step.index,
+                time: step.time,
+                changes_project: step.changes_project,
+            });
         }
     }
+
+    /// Announces an action and leaves the UI time to show it before the work starts.
+    async fn begin(&self, step: &Step) {
+        self.announce(step, AgentPhase::Started);
+        if let Some(link) = &self.link {
+            tokio::time::sleep(link.pace).await;
+        }
+    }
+
+    fn end(&self, step: &Step, ok: bool) {
+        let phase = if ok {
+            AgentPhase::Finished
+        } else {
+            AgentPhase::Failed
+        };
+        self.announce(step, phase);
+    }
+
+    /// Runs one visible action: announce it, do the work, report.
+    async fn run<T: Serialize>(
+        &self,
+        step: Step,
+        work: impl Future<Output = Result<T, EngineError>>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.begin(&step).await;
+        let result = work.await;
+        self.end(&step, result.is_ok());
+        respond(result)
+    }
+}
+
+/// What the UI is told about an action.
+struct Step {
+    tool: &'static str,
+    label: String,
+    index: Option<usize>,
+    time: Option<f64>,
+    changes_project: bool,
+}
+
+impl Step {
+    fn new(tool: &'static str, label: impl Into<String>, changes_project: bool) -> Self {
+        Self {
+            tool,
+            label: label.into(),
+            index: None,
+            time: None,
+            changes_project,
+        }
+    }
+}
+
+fn file_label(path: &Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    )
+}
+
+/// Describes the first operation of a batch; clip numbers are 1-based for humans.
+fn op_step(ops: &[EdlOpInput]) -> Step {
+    let (label, index) = match ops.first() {
+        Some(EdlOpInput::Delete { index }) => {
+            (format!("Deleting clip {}", index + 1), Some(*index))
+        }
+        Some(EdlOpInput::Trim { index, .. }) => {
+            (format!("Trimming clip {}", index + 1), Some(*index))
+        }
+        Some(EdlOpInput::Split { index, .. }) => {
+            (format!("Splitting clip {}", index + 1), Some(*index))
+        }
+        Some(EdlOpInput::Move { from, .. }) => (format!("Moving clip {}", from + 1), Some(*from)),
+        Some(EdlOpInput::Insert { index, .. }) => ("Adding a clip".to_owned(), Some(*index)),
+        Some(EdlOpInput::Clear) => ("Clearing the timeline".to_owned(), None),
+        None => ("Editing the timeline".to_owned(), None),
+    };
+    let mut step = Step::new("edit_edl", label, true);
+    step.index = index;
+    step
 }
 
 // ---- Tool arguments (their doc comments become the JSON schema descriptions) ----
@@ -200,7 +299,10 @@ impl AutoladServer {
         &self,
         Parameters(args): Parameters<ImportArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        respond(self.engine.import_media(&PathBuf::from(args.path)).await)
+        let path = PathBuf::from(args.path);
+        let label = format!("Importing {}", file_label(&path));
+        let step = Step::new("import_media", label, true);
+        self.run(step, self.engine.import_media(&path)).await
     }
 
     #[tool(
@@ -217,11 +319,11 @@ impl AutoladServer {
         &self,
         Parameters(a): Parameters<DetectSilencesArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        respond(
-            self.engine
-                .detect_silences(&a.asset_id, a.noise_db, a.min_silence)
-                .await,
-        )
+        let step = Step::new("detect_silences", "Listening for silences", false);
+        let work = self
+            .engine
+            .detect_silences(&a.asset_id, a.noise_db, a.min_silence);
+        self.run(step, work).await
     }
 
     #[tool(
@@ -231,16 +333,14 @@ impl AutoladServer {
         &self,
         Parameters(a): Parameters<TranscribeArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        respond(
-            self.engine
-                .transcribe(TranscribeRequest {
-                    asset_id: a.asset_id,
-                    language: a.language,
-                    model: a.model,
-                    word_timestamps: a.word_timestamps.unwrap_or(false),
-                })
-                .await,
-        )
+        let step = Step::new("transcribe", "Transcribing the speech", false);
+        let request = TranscribeRequest {
+            asset_id: a.asset_id,
+            language: a.language,
+            model: a.model,
+            word_timestamps: a.word_timestamps.unwrap_or(false),
+        };
+        self.run(step, self.engine.transcribe(request)).await
     }
 
     #[tool(
@@ -251,21 +351,19 @@ impl AutoladServer {
         Parameters(a): Parameters<BuildSilenceEdlArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let defaults = SilenceSettings::default();
-        respond(
-            self.engine
-                .build_silence_edl(BuildEdlRequest {
-                    asset_id: a.asset_id,
-                    settings: SilenceSettings {
-                        max_gap: a.max_gap.unwrap_or(defaults.max_gap),
-                        margin: a.margin.unwrap_or(defaults.margin),
-                        min_segment: a.min_segment.unwrap_or(defaults.min_segment),
-                    },
-                    noise_db: a.noise_db,
-                    min_silence: a.min_silence,
-                    append: a.append.unwrap_or(false),
-                })
-                .await,
-        )
+        let request = BuildEdlRequest {
+            asset_id: a.asset_id,
+            settings: SilenceSettings {
+                max_gap: a.max_gap.unwrap_or(defaults.max_gap),
+                margin: a.margin.unwrap_or(defaults.margin),
+                min_segment: a.min_segment.unwrap_or(defaults.min_segment),
+            },
+            noise_db: a.noise_db,
+            min_silence: a.min_silence,
+            append: a.append.unwrap_or(false),
+        };
+        let step = Step::new("build_silence_edl", "Cutting the silences", true);
+        self.run(step, self.engine.build_silence_edl(request)).await
     }
 
     #[tool(
@@ -282,8 +380,9 @@ impl AutoladServer {
         &self,
         Parameters(a): Parameters<EditEdlArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        let step = op_step(&a.ops);
         let ops = a.ops.into_iter().map(EdlOp::from).collect();
-        respond(self.engine.edit_edl(ops).await)
+        self.run(step, self.engine.edit_edl(ops)).await
     }
 
     #[tool(
@@ -293,19 +392,26 @@ impl AutoladServer {
         &self,
         Parameters(a): Parameters<PreviewFrameArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        let mut step = Step::new("preview_frame", "Looking at the footage", false);
         let target = match (a.timeline_time, a.asset_id, a.source_time) {
-            (Some(time), None, None) => FrameTarget::Timeline { time },
+            (Some(time), None, None) => {
+                step.label = format!("Looking at {time:.1} s");
+                step.time = Some(time);
+                FrameTarget::Timeline { time }
+            }
             (None, Some(asset_id), Some(time)) => FrameTarget::Source { asset_id, time },
             _ => {
                 let msg = "give either timeline_time, or both asset_id and source_time";
                 return Ok(CallToolResult::error(vec![ContentBlock::text(msg)]));
             }
         };
-        match self
+        self.begin(&step).await;
+        let result = self
             .engine
             .preview_frame(target, a.max_width.unwrap_or(640))
-            .await
-        {
+            .await;
+        self.end(&step, result.is_ok());
+        match result {
             Ok(frame) => Ok(CallToolResult::success(vec![
                 ContentBlock::text(frame.description),
                 ContentBlock::image(base64::encode(&frame.png), "image/png"),
@@ -321,12 +427,15 @@ impl AutoladServer {
         &self,
         Parameters(a): Parameters<PathArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        respond(
+        let path = PathBuf::from(a.path);
+        let step = Step::new("save_project", "Saving the project", true);
+        let work = async {
             self.engine
-                .save_project(&PathBuf::from(a.path))
+                .save_project(&path)
                 .await
-                .map(|path| serde_json::json!({ "saved_to": path })),
-        )
+                .map(|saved| serde_json::json!({ "saved_to": saved }))
+        };
+        self.run(step, work).await
     }
 
     #[tool(
@@ -336,7 +445,13 @@ impl AutoladServer {
         &self,
         Parameters(a): Parameters<PathArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        respond(self.engine.open_project(&PathBuf::from(a.path)).await)
+        let path = PathBuf::from(a.path);
+        let step = Step::new(
+            "open_project",
+            format!("Opening {}", file_label(&path)),
+            true,
+        );
+        self.run(step, self.engine.open_project(&path)).await
     }
 
     #[tool(
@@ -346,19 +461,22 @@ impl AutoladServer {
         &self,
         Parameters(a): Parameters<RenderStartArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        respond(
+        let request = RenderRequest {
+            output: PathBuf::from(a.output),
+            draft: a.draft.unwrap_or(false),
+            width: a.width,
+            height: a.height,
+            fps: a.fps,
+            overwrite: a.overwrite.unwrap_or(false),
+        };
+        let step = Step::new("render_start", "Starting the export", false);
+        let work = async {
             self.engine
-                .render_start(RenderRequest {
-                    output: PathBuf::from(a.output),
-                    draft: a.draft.unwrap_or(false),
-                    width: a.width,
-                    height: a.height,
-                    fps: a.fps,
-                    overwrite: a.overwrite.unwrap_or(false),
-                })
+                .render_start(request)
                 .await
-                .map(|job_id| serde_json::json!({ "job_id": job_id })),
-        )
+                .map(|job_id| serde_json::json!({ "job_id": job_id }))
+        };
+        self.run(step, work).await
     }
 
     #[tool(
@@ -376,7 +494,8 @@ impl AutoladServer {
         &self,
         Parameters(a): Parameters<JobArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        respond(self.engine.render_cancel(&a.job_id).await)
+        let step = Step::new("render_cancel", "Cancelling the export", false);
+        self.run(step, self.engine.render_cancel(&a.job_id)).await
     }
 }
 
@@ -394,8 +513,17 @@ Times are in seconds. Cut indices refer to get_edl. Use save_project to persist 
 )]
 impl ServerHandler for AutoladServer {}
 
-/// Runs the MCP server over stdin/stdout until the client disconnects.
+/// MCP on stdin/stdout for an agent. If the desktop app is open the agent is connected to it
+/// (shared project, live UI); otherwise a standalone engine serves it.
 /// stdout carries the protocol, so nothing else may ever be printed to it.
+pub async fn run_stdio() -> Result<(), EngineError> {
+    if let Some(stream) = crate::bridge::connect(&crate::paths::data_dir()).await {
+        return crate::bridge::pipe_stdio(stream).await;
+    }
+    serve_stdio(Engine::discover()?).await
+}
+
+/// Runs the MCP server over stdin/stdout until the client disconnects.
 pub async fn serve_stdio(engine: Engine) -> Result<(), EngineError> {
     let service = AutoladServer::new(engine)
         .serve(rmcp::transport::stdio())

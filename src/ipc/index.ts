@@ -1,8 +1,9 @@
 // Single entry point to the backend: the rest of the front never imports bindings.ts directly.
-import { commands, type AppError, type Result } from "./bindings";
+import { commands, events, type AppError, type Result } from "./bindings";
 
-export { commands as api };
+export { commands as api, events };
 export type {
+  AgentActivity,
   AppError,
   Asset,
   AssetSummary,

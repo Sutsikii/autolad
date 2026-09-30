@@ -35,7 +35,7 @@ export function LibraryPanel() {
 
   return (
     <Panel title="Project" className="w-72 shrink-0">
-      <div className="flex gap-1.5 border-b border-black/40 p-2">
+      <div data-agent="import" className="flex gap-1.5 border-b border-black/40 p-2">
         <input
           value={pathInput}
           onChange={(e) => setPathInput(e.target.value)}

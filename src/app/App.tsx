@@ -1,3 +1,5 @@
+import { AgentCursor } from "@/features/agent/AgentCursor";
+import { useAgentEvents } from "@/features/agent/useAgentEvents";
 import { AutomationPanel } from "@/features/automation/AutomationPanel";
 import { usePing } from "@/features/automation/usePing";
 import { ExportControls } from "@/features/export/ExportControls";
@@ -15,7 +17,9 @@ function TopBar() {
     <header className="flex h-11 shrink-0 items-center justify-between border-b border-black bg-[#1a1a1a] px-4">
       <div className="flex items-baseline gap-2">
         <span className="text-sm font-semibold tracking-wide text-neutral-100">AutoLad</span>
-        <span className="text-xs text-neutral-500">Untitled sequence</span>
+        <span data-agent="project-title" className="text-xs text-neutral-500">
+          Untitled sequence
+        </span>
       </div>
       <ExportControls />
     </header>
@@ -41,6 +45,7 @@ function StatusBar() {
 export function App() {
   useHydrate();
   useShortcuts();
+  useAgentEvents();
   const selectedAssetId = useLibraryStore((s) => s.selectedId);
 
   return (
@@ -54,6 +59,7 @@ export function App() {
       <div className="h-px shrink-0" />
       <TimelinePanel />
       <StatusBar />
+      <AgentCursor />
     </div>
   );
 }

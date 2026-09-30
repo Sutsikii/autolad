@@ -33,7 +33,10 @@ export function PreviewPanel() {
 
   return (
     <Panel title="Program" className="flex-1">
-      <div className="relative flex min-h-0 flex-1 items-center justify-center bg-black">
+      <div
+        data-agent="monitor"
+        className="relative flex min-h-0 flex-1 items-center justify-center bg-black"
+      >
         <video
           ref={videoRef}
           playsInline

@@ -65,6 +65,7 @@ export function TimelinePanel() {
     <Panel
       title={`Timeline — ${clipCount} clip${clipCount === 1 ? "" : "s"} · ${formatTimecode(duration)}`}
       actions={toolbar}
+      agent="timeline"
       className="h-60"
     >
       <TimelineCanvas fitRequest={fitRequest} />

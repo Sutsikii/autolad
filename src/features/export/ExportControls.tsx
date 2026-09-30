@@ -49,6 +49,7 @@ export function ExportControls() {
         Draft
       </label>
       <button
+        data-agent="export"
         className={btnPrimary}
         disabled={!hasClips || running || starting}
         onClick={() => void start(draft)}

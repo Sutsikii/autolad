@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use autolad_mcp::Engine;
 use tokio_util::sync::CancellationToken;
 
@@ -9,20 +11,25 @@ pub struct AppState {
     pub shutdown: CancellationToken,
     /// Kept as a message when the ffmpeg sidecar is missing, so the window still opens
     /// and every command can explain what is wrong.
-    engine: Result<Engine, String>,
+    engine: Result<Arc<Engine>, String>,
 }
 
 impl AppState {
     pub fn new() -> Self {
         Self {
             shutdown: CancellationToken::new(),
-            engine: Engine::discover().map_err(|e| e.to_string()),
+            engine: Engine::discover().map(Arc::new).map_err(|e| e.to_string()),
         }
+    }
+
+    /// Same engine, for things that outlive a command (the agent bridge).
+    pub fn shared_engine(&self) -> Option<Arc<Engine>> {
+        self.engine.as_ref().ok().map(Arc::clone)
     }
 
     pub fn engine(&self) -> Result<&Engine, AppError> {
         self.engine
-            .as_ref()
+            .as_deref()
             .map_err(|message| AppError::Internal(message.clone()))
     }
 }

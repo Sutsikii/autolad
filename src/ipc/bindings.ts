@@ -124,6 +124,11 @@ async renderCancel(jobId: string) : Promise<Result<JobStatus, AppError>> {
 /** user-defined events **/
 
 
+export const events = __makeEvents__<{
+agentActivity: AgentActivity
+}>({
+agentActivity: "agent-activity"
+})
 
 /** user-defined constants **/
 
@@ -131,6 +136,15 @@ async renderCancel(jobId: string) : Promise<Result<JobStatus, AppError>> {
 
 /** user-defined types **/
 
+/**
+ * One step of what an agent is doing, for the virtual cursor.
+ */
+export type AgentActivity = { tool: string; phase: AgentPhase; label: string; index: number | null; time: number | null; changes_project: boolean }
+export type AgentPhase = 
+/**
+ * The agent just asked for the action; the UI has time to move a cursor there.
+ */
+"started" | "finished" | "failed"
 /**
  * Error surfaced to the front. Serialized as `{ kind, message }` so the UI can
  * branch on `kind` without parsing text.

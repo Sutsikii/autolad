@@ -11,6 +11,7 @@ Distribuée sous forme d'installeur Windows (.exe / .msi).
 - **Vidéo** : ffmpeg / ffprobe embarqués en sidecar, build **GPL** statique de BtbN (n8.1.3, figé dans `scripts/fetch-ffmpeg.ps1`, SHA-256 vérifié). GPL choisi pour avoir libx264 en fallback ; ffmpeg tourne dans un process séparé (pas de liaison), mais la notice de licence est livrée (`third-party/ffmpeg/LICENSE.txt`) et il faut fournir la source ou une offre de source à la distribution.
 - **IA** : whisper-rs (whisper.cpp) avec backend **Vulkan** par défaut (`cuda` optionnel), modèles ggml quantifiés téléchargés à la demande (défaut : `small` q5_1, ~190 Mo ; `large-v3-turbo` en option), hash vérifié
 - **Agents** : le même `autolad.exe` lancé avec `--mcp` est un serveur MCP (stdio, sans fenêtre) : un seul exécutable à installer
+- **Pont agent ↔ app** : l'app ouverte héberge elle-même le serveur MCP sur 127.0.0.1 (port + secret dans `<data>/bridge.json`). `--mcp` s'y connecte et ne fait que relayer stdin/stdout ; sans app ouverte (fichier absent, périmé ou secret refusé) il sert un moteur autonome. Même `Engine` pour l'UI et l'agent = même projet en direct. Chaque action d'agent est annoncée au front (événement `agent-activity`) : le curseur « Claude » glisse vers la cible pendant la pause de 900 ms que le back laisse avant d'agir, clique à la fin, puis l'UI recharge le projet. Pour que l'agent voie l'app, l'ouvrir AVANT de (re)connecter le MCP (`/mcp`).
 - **Bindings TS** : générés depuis Rust avec tauri-specta (jamais écrits à la main)
 - **Package manager** : pnpm
 

@@ -1,11 +1,12 @@
 //! Composition root: wires `core` and its implementations to the Tauri commands.
 
+mod agent;
 mod commands;
 mod error;
 mod state;
 
 use tauri::Manager;
-use tauri_specta::{collect_commands, Builder};
+use tauri_specta::{collect_commands, collect_events, Builder};
 
 use state::AppState;
 
@@ -25,10 +26,8 @@ pub fn run_mcp() -> std::process::ExitCode {
         }
     };
 
-    let result = runtime.block_on(async {
-        let engine = autolad_mcp::Engine::discover()?;
-        autolad_mcp::serve_stdio(engine).await
-    });
+    // Connects to the open app when there is one, else serves a standalone engine.
+    let result = runtime.block_on(autolad_mcp::run_stdio());
     match result {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
@@ -48,21 +47,23 @@ fn ts_exporter() -> specta_typescript::Typescript {
 }
 
 fn specta_builder() -> Builder<tauri::Wry> {
-    Builder::<tauri::Wry>::new().commands(collect_commands![
-        commands::system::ping,
-        commands::automation::build_silence_edl,
-        commands::editor::import_media,
-        commands::editor::project_status,
-        commands::editor::auto_cut,
-        commands::editor::edit_edl,
-        commands::editor::preview_frame,
-        commands::editor::prepare_proxy,
-        commands::editor::prepare_thumbnails,
-        commands::editor::prepare_waveform,
-        commands::editor::render_start,
-        commands::editor::render_status,
-        commands::editor::render_cancel,
-    ])
+    Builder::<tauri::Wry>::new()
+        .events(collect_events![agent::AgentActivity])
+        .commands(collect_commands![
+            commands::system::ping,
+            commands::automation::build_silence_edl,
+            commands::editor::import_media,
+            commands::editor::project_status,
+            commands::editor::auto_cut,
+            commands::editor::edit_edl,
+            commands::editor::preview_frame,
+            commands::editor::prepare_proxy,
+            commands::editor::prepare_thumbnails,
+            commands::editor::prepare_waveform,
+            commands::editor::render_start,
+            commands::editor::render_status,
+            commands::editor::render_cancel,
+        ])
 }
 
 // Startup failures are unrecoverable and Tauri's own templates end with `expect`.
@@ -77,8 +78,13 @@ pub fn run() {
 
     tauri::Builder::default()
         .invoke_handler(builder.invoke_handler())
-        .setup(|app| {
-            app.manage(AppState::new());
+        .setup(move |app| {
+            builder.mount_events(app);
+            let state = AppState::new();
+            if let Some(engine) = state.shared_engine() {
+                agent::start_bridge(app.handle().clone(), engine);
+            }
+            app.manage(state);
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -86,6 +92,7 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 app.state::<AppState>().shutdown.cancel();
+                agent::stop_bridge();
             }
         });
 }
