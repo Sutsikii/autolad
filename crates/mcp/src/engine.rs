@@ -28,7 +28,9 @@ use crate::jobs::{JobStatus, Jobs};
 use crate::project_file::{AssetEntry, ProjectFile};
 
 mod text;
-pub use text::{CutTextRequest, EditLine, EditTranscript, Occurrence, TextCut, TextEditReport};
+pub use text::{
+    CutTextRequest, EditLine, EditTranscript, Occurrence, SubtitleExport, TextCut, TextEditReport,
+};
 
 const DEFAULT_NOISE_DB: f64 = -30.0;
 const DEFAULT_MIN_SILENCE: f64 = 0.3;
@@ -242,6 +244,18 @@ pub struct RenderRequest {
     pub overwrite: bool,
     /// Loudness target in LUFS; `None` keeps the recorded levels.
     pub loudness: Option<f64>,
+    /// Burn subtitles of the speech into the picture.
+    pub subtitles: bool,
+}
+
+/// A scratch file deleted when dropped, however the work using it ends.
+struct ScratchFile(PathBuf);
+
+impl Drop for ScratchFile {
+    fn drop(&mut self) {
+        // Best effort: a leftover scratch file is harmless.
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -707,12 +721,7 @@ impl Engine {
             }
         };
 
-        let dir = self.data_dir.join("tmp");
-        tokio::fs::create_dir_all(&dir)
-            .await
-            .map_err(|e| io_err(&dir, &e))?;
-        let n = self.tmp_counter.fetch_add(1, Ordering::Relaxed);
-        let png_path = dir.join(format!("frame-{}-{n}.png", std::process::id()));
+        let png_path = self.scratch_path("frame", "png").await?;
 
         let max_width = max_width.clamp(64, 1920);
         let result = extract_frame(
@@ -735,6 +744,17 @@ impl Engine {
             png: png?,
             description,
         })
+    }
+
+    /// A new file name in `<data>/tmp`, unique across processes; plain ASCII, so ffmpeg
+    /// filters can take it as is.
+    async fn scratch_path(&self, prefix: &str, ext: &str) -> Result<PathBuf, EngineError> {
+        let dir = self.data_dir.join("tmp");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(|e| io_err(&dir, &e))?;
+        let n = self.tmp_counter.fetch_add(1, Ordering::Relaxed);
+        Ok(dir.join(format!("{prefix}-{}-{n}.{ext}", std::process::id())))
     }
 
     // ---- Project files -----------------------------------------------------
@@ -803,6 +823,13 @@ impl Engine {
     // ---- Rendering ---------------------------------------------------------
 
     pub async fn render_start(&self, req: RenderRequest) -> Result<String, EngineError> {
+        // First, as it may transcribe for a while: the EDL is read after.
+        let subtitles = if req.subtitles {
+            let srt = self.subtitle_file().await?;
+            Some(ScratchFile(srt))
+        } else {
+            None
+        };
         let (edl, entries) = {
             let state = lock(&self.state);
             (state.project.edl.clone(), state.project.assets.clone())
@@ -820,7 +847,8 @@ impl Engine {
             .iter()
             .find(|e| e.asset.id == edl.cuts[0].asset)
             .ok_or_else(|| EngineError::UnknownAsset(edl.cuts[0].asset.0.clone()))?;
-        let options = resolve_options(first, &req)?;
+        let mut options = resolve_options(first, &req)?;
+        options.subtitles = subtitles.as_ref().map(|file| file.0.clone());
 
         let encoder = *self
             .encoder
@@ -831,6 +859,7 @@ impl Engine {
         let out = output.clone();
 
         Ok(self.jobs.spawn(output, move |progress| async move {
+            let _subtitles = subtitles;
             renderer
                 .render_edl(&assets, &edl, &options, &out, &*progress)
                 .await
@@ -995,6 +1024,7 @@ fn resolve_options(first: &AssetEntry, req: &RenderRequest) -> Result<RenderOpti
         height: even(height),
         fps,
         loudness: req.loudness,
+        subtitles: None,
     };
     if !options.fps.is_finite() || options.fps <= 0.0 || options.fps > 240.0 {
         return Err(EngineError::Invalid("fps must be in (0, 240]".into()));
@@ -1031,6 +1061,7 @@ mod tests {
             fps: None,
             overwrite: false,
             loudness: None,
+            subtitles: false,
         }
     }
 
@@ -1317,6 +1348,28 @@ mod tests {
             engine.edl_summary().history.undo.as_deref(),
             Some("Remove 1 retake")
         );
+    }
+
+    #[tokio::test]
+    async fn subtitles_are_exported_as_srt_or_vtt() {
+        let engine = engine_saying("Bonjour à tous. On commence.").await;
+        let dir = std::env::temp_dir().join(format!("autolad-subs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let srt = engine.export_subtitles(&dir.join("a.srt")).await.unwrap();
+        assert_eq!(srt.cues, 2);
+        let text = std::fs::read_to_string(&srt.path).unwrap();
+        assert!(text.starts_with("1\n00:00:00,000 --> 00:00:01,400\nBonjour à tous.\n"));
+
+        let vtt = engine.export_subtitles(&dir.join("a.VTT")).await.unwrap();
+        assert!(std::fs::read_to_string(vtt.path)
+            .unwrap()
+            .starts_with("WEBVTT"));
+        assert!(engine.export_subtitles(&dir.join("a.txt")).await.is_err());
+        assert!(engine
+            .export_subtitles(&dir.join("missing/a.srt"))
+            .await
+            .is_err());
     }
 
     #[tokio::test]

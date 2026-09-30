@@ -3,9 +3,11 @@
 //! first use and stored in the project like every transcript.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use autolad_core::edl_edit::EdlOp;
 use autolad_core::ports::TranscriptSegment;
+use autolad_core::subtitles::{cues, to_srt, to_vtt, Cue, CueLayout};
 use autolad_core::transcript::{
     edit_words, filler_words, find_retakes, find_text, removal_ops, sentence_spans, span_text,
     EditWord, Span,
@@ -13,7 +15,7 @@ use autolad_core::transcript::{
 use autolad_core::{AssetId, TimeRange};
 use serde::Serialize;
 
-use super::{lock, EdlSummary, Engine, TranscribeRequest};
+use super::{io_err, lock, EdlSummary, Engine, TranscribeRequest};
 use crate::error::EngineError;
 
 /// Longest quote of the cut text in an undo label.
@@ -77,6 +79,13 @@ pub enum Occurrence {
         start: f64,
         end: f64,
     },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct SubtitleExport {
+    pub path: PathBuf,
+    pub cues: usize,
 }
 
 pub struct CutTextRequest {
@@ -163,6 +172,78 @@ impl Engine {
             .collect();
         let label = format!("Remove {}", counted(spans.len(), "retake"));
         self.remove_spans(&words, &spans, label, !dry_run).await
+    }
+
+    /// Writes the subtitles of the edit to an `.srt` or `.vtt` file, timed on the edited
+    /// timeline.
+    pub async fn export_subtitles(&self, output: &Path) -> Result<SubtitleExport, EngineError> {
+        let output = std::path::absolute(output).map_err(|e| io_err(output, &e))?;
+        let extension = output
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase());
+        let format: fn(&[Cue]) -> String = match extension.as_deref() {
+            Some("srt") => to_srt,
+            Some("vtt") => to_vtt,
+            _ => {
+                return Err(EngineError::Invalid(
+                    "subtitles are written as .srt or .vtt".into(),
+                ))
+            }
+        };
+        if !output.parent().is_some_and(Path::is_dir) {
+            return Err(EngineError::Invalid(format!(
+                "output folder does not exist: {}",
+                output.display()
+            )));
+        }
+        let cues = self.subtitle_cues().await?;
+        tokio::fs::write(&output, format(&cues))
+            .await
+            .map_err(|e| io_err(&output, &e))?;
+        Ok(SubtitleExport {
+            path: output,
+            cues: cues.len(),
+        })
+    }
+
+    /// Subtitles of the edit as a SubRip scratch file, for burning into a render.
+    pub(super) async fn subtitle_file(&self) -> Result<PathBuf, EngineError> {
+        let cues = self.subtitle_cues().await?;
+        let path = self.scratch_path("subtitles", "srt").await?;
+        tokio::fs::write(&path, to_srt(&cues))
+            .await
+            .map_err(|e| io_err(&path, &e))?;
+        Ok(path)
+    }
+
+    async fn subtitle_cues(&self) -> Result<Vec<Cue>, EngineError> {
+        let words = self.word_level_edit().await?;
+        let cues = cues(&words, self.cue_layout());
+        if cues.is_empty() {
+            return Err(EngineError::Invalid(
+                "nothing is said in the edit: there are no subtitles to make".into(),
+            ));
+        }
+        Ok(cues)
+    }
+
+    /// Cues are sized for the sequence's frame, which is the first clip's.
+    fn cue_layout(&self) -> CueLayout {
+        let state = lock(&self.state);
+        state
+            .project
+            .edl
+            .cuts
+            .first()
+            .and_then(|cut| {
+                state
+                    .project
+                    .assets
+                    .iter()
+                    .find(|e| e.asset.id == cut.asset)
+            })
+            .and_then(|e| Some(CueLayout::for_frame(e.width?, e.height?)))
+            .unwrap_or(CueLayout::LANDSCAPE)
     }
 
     /// The EDL and the assets it plays that have sound, each once.

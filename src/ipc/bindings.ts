@@ -202,11 +202,12 @@ async newProject() : Promise<Result<null, AppError>> {
 },
 /**
  * Renders to `output`, or next to the first source when none is given. Every cut gets short
- * audio fades; `normalize_audio` also levels the loudness to -14 LUFS.
+ * audio fades; `normalize_audio` also levels the loudness to -14 LUFS, and `burn_subtitles`
+ * draws the speech as captions.
  */
-async renderStart(draft: boolean, output: string | null, normalizeAudio: boolean) : Promise<Result<string, AppError>> {
+async renderStart(draft: boolean, output: string | null, normalizeAudio: boolean, burnSubtitles: boolean) : Promise<Result<string, AppError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("render_start", { draft, output, normalizeAudio }) };
+    return { status: "ok", data: await TAURI_INVOKE("render_start", { draft, output, normalizeAudio, burnSubtitles }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -223,6 +224,17 @@ async renderStatus(jobId: string) : Promise<Result<JobStatus, AppError>> {
 async renderCancel(jobId: string) : Promise<Result<JobStatus, AppError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("render_cancel", { jobId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Writes the subtitles of the edit as `.srt` or `.vtt`.
+ */
+async exportSubtitles(output: string) : Promise<Result<SubtitleExport, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_subtitles", { output }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -413,6 +425,7 @@ margin: number;
  * Kept segments shorter than this are discarded.
  */
 min_segment: number }
+export type SubtitleExport = { path: string; cues: number }
 /**
  * A piece of speech removed (or that would be removed) from the edit.
  */

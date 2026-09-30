@@ -194,6 +194,7 @@ fn handshake_and_tool_catalogue() {
         "render_start",
         "render_status",
         "render_cancel",
+        "export_subtitles",
     ] {
         assert!(
             names.contains(&expected),

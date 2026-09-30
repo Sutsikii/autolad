@@ -318,6 +318,7 @@ async fn draft_render_produces_a_playable_smaller_video() {
             fps: None,
             overwrite: false,
             loudness: Some(-14.0),
+            subtitles: false,
         })
         .await
         .unwrap();
@@ -351,6 +352,7 @@ async fn render_refuses_dangerous_or_pointless_requests() {
         fps: None,
         overwrite: false,
         loudness: Some(-14.0),
+        subtitles: false,
     };
 
     // Nothing to render yet.
@@ -411,6 +413,7 @@ async fn cancelling_a_render_stops_ffmpeg_and_removes_the_output() {
             fps: None,
             overwrite: false,
             loudness: Some(-14.0),
+            subtitles: false,
         })
         .await
         .unwrap();
@@ -532,6 +535,7 @@ async fn a_clip_without_sound_can_be_imported_edited_and_rendered() {
             fps: None,
             overwrite: false,
             loudness: Some(-14.0),
+            subtitles: false,
         })
         .await
         .unwrap();
@@ -790,6 +794,7 @@ async fn every_video_shape_is_imported_previewed_and_exported_at_the_right_size(
                 fps: None,
                 overwrite: true,
                 loudness: Some(-14.0),
+                subtitles: false,
             })
             .await
             .unwrap();
@@ -890,7 +895,18 @@ async fn a_spoken_edit_is_cleaned_up_by_text() {
     let phrases = engine.find_transcript(&asset.id).unwrap();
     assert!(phrases.segments.len() < 12, "{:?}", phrases.segments);
 
-    // What the rendered file really says, heard by whisper again.
+    let srt = engine
+        .export_subtitles(&dir.join("cleaned.srt"))
+        .await
+        .unwrap();
+    let captions = std::fs::read_to_string(&srt.path).unwrap();
+    println!(
+        "subtitles:
+{captions}"
+    );
+    assert!(captions.contains("video editing") && !captions.contains("go away"));
+
+    // What the rendered file (captions burnt in) really says, heard by whisper again.
     let out = dir.join("cleaned.mp4");
     let job = engine
         .render_start(RenderRequest {
@@ -901,6 +917,7 @@ async fn a_spoken_edit_is_cleaned_up_by_text() {
             fps: None,
             overwrite: true,
             loudness: Some(-14.0),
+            subtitles: true,
         })
         .await
         .unwrap();

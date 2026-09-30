@@ -2,7 +2,7 @@
 //! each also gets a test mock, which is what justifies the abstraction.
 
 use std::future::Future;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +22,7 @@ pub struct MediaInfo {
 
 /// Output format of a render. All cuts are conformed to it so rushes with
 /// different resolutions or frame rates can be joined.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RenderOptions {
     pub width: u32,
     pub height: u32,
@@ -30,6 +30,8 @@ pub struct RenderOptions {
     /// Integrated loudness the audio is normalized to, in LUFS (EBU R128). `None` keeps the
     /// levels as recorded.
     pub loudness: Option<f64>,
+    /// SubRip file burnt into the picture.
+    pub subtitles: Option<PathBuf>,
 }
 
 /// Receives render progress as a fraction in `[0, 1]`.

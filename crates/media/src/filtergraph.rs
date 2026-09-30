@@ -1,6 +1,8 @@
 //! EDL → ffmpeg `filter_complex` graph. Pure string building, so it is unit-tested
 //! without running ffmpeg.
 
+use std::path::Path;
+
 use autolad_core::ports::RenderOptions;
 use autolad_core::TimeRange;
 
@@ -67,12 +69,7 @@ pub fn build_filter_graph(
         }
     }
 
-    let RenderOptions {
-        width,
-        height,
-        fps,
-        loudness,
-    } = *opts;
+    let (width, height, fps) = (opts.width, opts.height, opts.fps);
     for (i, (cut, slot)) in cuts.iter().zip(&slots).enumerate() {
         let (s, e) = (cut.range.start, cut.range.end);
         let input = cut.input;
@@ -99,10 +96,15 @@ pub fn build_filter_graph(
 
     let pads: String = (0..cuts.len()).map(|i| format!("[v{i}][a{i}]")).collect();
     let n = cuts.len();
-    match loudness {
-        None => parts.push(format!("{pads}concat=n={n}:v=1:a=1[outv][outa]")),
+    let video = if opts.subtitles.is_some() {
+        "[cat]"
+    } else {
+        "[outv]"
+    };
+    match opts.loudness {
+        None => parts.push(format!("{pads}concat=n={n}:v=1:a=1{video}[outa]")),
         Some(target) => {
-            parts.push(format!("{pads}concat=n={n}:v=1:a=1[outv][mix]"));
+            parts.push(format!("{pads}concat=n={n}:v=1:a=1{video}[mix]"));
             // loudnorm works at 192 kHz internally: bring it back to the output rate.
             parts.push(format!(
                 "[mix]loudnorm=I={target}:TP={TRUE_PEAK_DB}:LRA={LOUDNESS_RANGE},\
@@ -110,7 +112,40 @@ pub fn build_filter_graph(
             ));
         }
     }
+    if let Some(file) = &opts.subtitles {
+        let name = subtitle_file_name(file)?;
+        let style = subtitle_style(width, height);
+        // Quoted as a whole: the style's commas would otherwise end the filter.
+        parts.push(format!(
+            "[cat]subtitles='filename={name}:force_style={style}'[outv]"
+        ));
+    }
     Ok(parts.join(";\n"))
+}
+
+/// The subtitle file is passed by name, ffmpeg running in its folder: a Windows path
+/// (`C:\...`) would need escaping at two levels of the filtergraph syntax.
+fn subtitle_file_name(path: &Path) -> Result<&str, MediaError> {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .filter(|n| {
+            n.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        })
+        .ok_or(MediaError::InvalidOptions(
+            "the subtitle file name must be plain ASCII",
+        ))
+}
+
+/// White bold text with a black outline, bottom centre. libass sizes SubRip text on a
+/// 288-line canvas scaled to the frame: portrait frames get smaller text, placed higher, as
+/// on short-video apps.
+fn subtitle_style(width: u32, height: u32) -> &'static str {
+    if height > width {
+        "FontName=Arial,Bold=1,FontSize=11,MarginV=70,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0"
+    } else {
+        "FontName=Arial,Bold=1,FontSize=16,MarginV=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=1.2,Shadow=0"
+    }
 }
 
 /// `afade` filters for cut `i`: in unless it continues the previous cut, out unless the next
@@ -134,6 +169,8 @@ fn fades(cuts: &[PlacedCut], i: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     fn cut(input: usize, s: f64, e: f64) -> PlacedCut {
@@ -148,6 +185,7 @@ mod tests {
         height: 720,
         fps: 30.0,
         loudness: None,
+        subtitles: None,
     };
 
     /// The filter chain that produces pad `[a{i}]`.
@@ -236,6 +274,39 @@ mod tests {
         assert!(g.contains("[sv0_1]trim=start=5.000000:end=6.000000"));
         assert!(g.contains("[sv1_0]trim=start=0.000000:end=2.000000"));
         assert!(g.contains("[v0][a0][v1][a1][v2][a2]concat=n=3"));
+    }
+
+    #[test]
+    fn subtitles_are_burnt_after_the_concat_by_file_name() {
+        let opts = RenderOptions {
+            subtitles: Some(PathBuf::from(r"C:\data\tmp\subs-1.srt")),
+            ..OPTS
+        };
+        let g = build_filter_graph(&[cut(0, 0.0, 1.0)], &[true], &opts).unwrap();
+        assert!(g.contains("concat=n=1:v=1:a=1[cat][outa]"));
+        assert!(g.contains("[cat]subtitles='filename=subs-1.srt:force_style=FontName=Arial,"));
+        assert!(g.ends_with("[outv]"));
+        assert!(!g.contains(r"C:\data"));
+
+        let portrait = RenderOptions {
+            width: 720,
+            height: 1280,
+            ..opts.clone()
+        };
+        let g = build_filter_graph(&[cut(0, 0.0, 1.0)], &[true], &portrait).unwrap();
+        assert!(g.contains("FontSize=11,MarginV=70"));
+    }
+
+    #[test]
+    fn a_subtitle_file_name_needing_escapes_is_refused() {
+        let opts = RenderOptions {
+            subtitles: Some(PathBuf::from("C:/x/it's here.srt")),
+            ..OPTS
+        };
+        assert!(matches!(
+            build_filter_graph(&[cut(0, 0.0, 1.0)], &[true], &opts),
+            Err(MediaError::InvalidOptions(_))
+        ));
     }
 
     #[test]

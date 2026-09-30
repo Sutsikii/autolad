@@ -5,8 +5,8 @@ use autolad_core::edl_edit::EdlOp;
 use autolad_mcp::base64;
 use autolad_mcp::engine::{
     AssetSummary, BuildEdlRequest, CutTextRequest, EditTranscript, EdlSummary, FrameTarget,
-    HistoryStep, Occurrence, OpenReport, ProjectStatus, RenderRequest, TextEditReport,
-    ThumbnailStrip, TranscribeRequest, TranscriptReport,
+    HistoryStep, Occurrence, OpenReport, ProjectStatus, RenderRequest, SubtitleExport,
+    TextEditReport, ThumbnailStrip, TranscribeRequest, TranscriptReport,
 };
 use autolad_mcp::jobs::JobStatus;
 use serde::Serialize;
@@ -226,7 +226,8 @@ pub fn new_project(state: State<'_, AppState>) -> Result<(), AppError> {
 const TARGET_LUFS: f64 = -14.0;
 
 /// Renders to `output`, or next to the first source when none is given. Every cut gets short
-/// audio fades; `normalize_audio` also levels the loudness to -14 LUFS.
+/// audio fades; `normalize_audio` also levels the loudness to -14 LUFS, and `burn_subtitles`
+/// draws the speech as captions.
 #[tauri::command]
 #[specta::specta]
 pub async fn render_start(
@@ -234,6 +235,7 @@ pub async fn render_start(
     draft: bool,
     output: Option<PathBuf>,
     normalize_audio: bool,
+    burn_subtitles: bool,
 ) -> Result<String, AppError> {
     let engine = state.engine()?;
     let status = engine.project_status();
@@ -255,8 +257,19 @@ pub async fn render_start(
         fps: None,
         overwrite: true,
         loudness: normalize_audio.then_some(TARGET_LUFS),
+        subtitles: burn_subtitles,
     };
     Ok(engine.render_start(request).await?)
+}
+
+/// Writes the subtitles of the edit as `.srt` or `.vtt`.
+#[tauri::command]
+#[specta::specta]
+pub async fn export_subtitles(
+    state: State<'_, AppState>,
+    output: PathBuf,
+) -> Result<SubtitleExport, AppError> {
+    Ok(state.engine()?.export_subtitles(&output).await?)
 }
 
 #[tauri::command]

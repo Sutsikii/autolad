@@ -110,6 +110,19 @@ export function pickVideos(onPath: (path: string) => Promise<void>): Promise<voi
   });
 }
 
+/** Where to write the subtitles (.srt or .vtt); `null` when the user cancels. */
+export async function chooseSubtitlesPath(): Promise<string | null> {
+  const chosen = await save({
+    defaultPath: `${suggestedName()}.srt`,
+    filters: [
+      { name: "SubRip subtitles", extensions: ["srt"] },
+      { name: "WebVTT subtitles", extensions: ["vtt"] },
+    ],
+  });
+  if (!chosen) return null;
+  return /\.(srt|vtt)$/i.test(chosen) ? chosen : withExtension(chosen, "srt");
+}
+
 /** Where to write the export; `null` when the user cancels. */
 export async function chooseExportPath(draft: boolean): Promise<string | null> {
   const suffix = draft ? "_draft" : "";

@@ -86,6 +86,7 @@ const OPTS: RenderOptions = RenderOptions {
     height: 240,
     fps: 25.0,
     loudness: Some(-14.0),
+    subtitles: None,
 };
 
 #[tokio::test]
@@ -286,6 +287,78 @@ async fn ffmpeg_failure_carries_its_message() {
         .await
         .unwrap_err();
     assert!(err.to_string().contains("nope.mp4"), "got: {err}");
+}
+
+/// Gray pixels of the bottom quarter of the frame at `time`: where subtitles are drawn.
+fn bottom_quarter(b: &Binaries, video: &Path, time: f64) -> Vec<u8> {
+    let output = Command::new(&b.ffmpeg)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            &time.to_string(),
+            "-i",
+        ])
+        .arg(video)
+        .args(["-frames:v", "1", "-vf", "crop=iw:ih/4:0:ih*3/4,format=gray"])
+        .args(["-f", "rawvideo", "-"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    output.stdout
+}
+
+#[tokio::test]
+async fn subtitles_are_burnt_into_the_picture() {
+    let b = binaries();
+    let dir = scratch("subtitles");
+    let clip = dir.join("clip.mp4");
+    make_clip(&b, &clip, "320x240");
+    let srt = dir.join("subs-1.srt");
+    std::fs::write(&srt, "1\n00:00:00,000 --> 00:00:01,000\nHELLO WORLD\n\n").unwrap();
+
+    let edl = Edl {
+        cuts: vec![cut("a", 0.0, 2.0)],
+    };
+    let render = |subtitles: Option<PathBuf>, name: &str| {
+        let out = dir.join(name);
+        let options = RenderOptions { subtitles, ..OPTS };
+        let renderer = FfmpegRenderer::new(b.clone(), Encoder::X264);
+        let assets = [asset("a", &clip)];
+        let edl = edl.clone();
+        async move {
+            renderer
+                .render_edl(&assets, &edl, &options, &out, &|_| {})
+                .await
+                .unwrap();
+            out
+        }
+    };
+    let plain = render(None, "plain.mp4").await;
+    let captioned = render(Some(srt), "captioned.mp4").await;
+
+    let changed = |time: f64| {
+        let (a, b) = (
+            bottom_quarter(&b, &plain, time),
+            bottom_quarter(&b, &captioned, time),
+        );
+        a.iter()
+            .zip(&b)
+            .filter(|(x, y)| x.abs_diff(**y) > 64)
+            .count()
+    };
+    // The caption shows during its second only, as white text.
+    assert!(
+        changed(0.5) > 200,
+        "no caption drawn: {} pixels changed",
+        changed(0.5)
+    );
+    assert!(
+        changed(1.5) < 20,
+        "caption still shown: {} pixels changed",
+        changed(1.5)
+    );
 }
 
 #[tokio::test]

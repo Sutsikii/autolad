@@ -19,6 +19,8 @@ struct Job<'a> {
     graph_path: &'a Path,
     output: &'a Path,
     total: f64,
+    /// ffmpeg runs here: the subtitle file is referred to by name (see `build_filter_graph`).
+    workdir: Option<&'a Path>,
 }
 
 /// Renders an EDL with ffmpeg. Cancel by dropping the future: the process is killed.
@@ -55,6 +57,7 @@ impl FfmpegRenderer {
             graph_path: &graph_path,
             output,
             total: edl.total_duration(),
+            workdir: options.subtitles.as_deref().and_then(Path::parent),
         };
         let encoder = self.encoder.for_size(options.width, options.height);
         match self.run(encoder, &job, progress).await {
@@ -78,8 +81,12 @@ impl FfmpegRenderer {
             graph_path,
             output,
             total,
+            workdir,
         } = *job;
         let mut cmd = command(&self.binaries.ffmpeg);
+        if let Some(dir) = workdir {
+            cmd.current_dir(dir);
+        }
         cmd.args([
             "-hide_banner",
             "-nostdin",
@@ -271,15 +278,24 @@ mod tests {
             height: 720,
             fps: 30.0,
             loudness: Some(-14.0),
+            subtitles: None,
         };
         assert!(validate(&ok).is_ok());
         assert!(validate(&RenderOptions {
             loudness: Some(0.0),
-            ..ok
+            ..ok.clone()
         })
         .is_err());
-        assert!(validate(&RenderOptions { width: 1281, ..ok }).is_err());
-        assert!(validate(&RenderOptions { fps: 0.0, ..ok }).is_err());
+        assert!(validate(&RenderOptions {
+            width: 1281,
+            ..ok.clone()
+        })
+        .is_err());
+        assert!(validate(&RenderOptions {
+            fps: 0.0,
+            ..ok.clone()
+        })
+        .is_err());
         assert!(validate(&RenderOptions {
             fps: f64::NAN,
             ..ok

@@ -71,6 +71,7 @@ export function resolveTarget(site: ActionSite): Point | null {
       return centerOf("project-title");
     case "render_start":
     case "render_cancel":
+    case "export_subtitles":
       return centerOf("export");
     default:
       return null;

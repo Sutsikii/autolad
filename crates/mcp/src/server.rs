@@ -303,6 +303,15 @@ struct RenderStartArgs {
     normalize_audio: Option<bool>,
     /// Loudness target in LUFS when normalizing, -70..-5. Default -14 (YouTube, Spotify).
     target_lufs: Option<f64>,
+    /// Burn subtitles of the speech into the picture (white text, bottom centre; sized for
+    /// portrait or landscape). Clips without word timings are transcribed first. Default false.
+    burn_subtitles: Option<bool>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SubtitlesArgs {
+    /// Output path ending in .srt (SubRip) or .vtt (WebVTT); its folder must exist.
+    output: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -574,6 +583,7 @@ impl AutoladServer {
                 .normalize_audio
                 .unwrap_or(true)
                 .then_some(a.target_lufs.unwrap_or(DEFAULT_LUFS)),
+            subtitles: a.burn_subtitles.unwrap_or(false),
         };
         let step = Step::new("render_start", "Starting the export", false);
         let work = async {
@@ -583,6 +593,18 @@ impl AutoladServer {
                 .map(|job_id| serde_json::json!({ "job_id": job_id }))
         };
         self.run(step, work).await
+    }
+
+    #[tool(
+        description = "Write the subtitles of the edit (.srt or .vtt), timed on the edited timeline, in short readable cues built from word timings. Clips without word timings are transcribed first. To burn them into the video instead, use render_start with burn_subtitles=true."
+    )]
+    async fn export_subtitles(
+        &self,
+        Parameters(a): Parameters<SubtitlesArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let path = PathBuf::from(a.output);
+        let step = Step::new("export_subtitles", "Writing the subtitles", false);
+        self.run(step, self.engine.export_subtitles(&path)).await
     }
 
     #[tool(
@@ -615,7 +637,7 @@ AutoLad edits videos locally. Typical workflow:
 4. Look at the result: get_edl for the cut list, get_edit_transcript to read what the edit says, preview_frame to see any moment of the source or of the edit.
    Edit by text: cut_text removes a sentence or words, remove_fillers the hesitations, remove_retakes the failed takes (all at word precision).
 5. Refine with edit_edl (delete / trim / split / move / insert cuts; a batch is applied atomically). Any change can be reverted with undo (and redo), including the user's.
-6. render_start (use draft=true for a quick low-res check), poll render_status until state is 'done', or render_cancel.
+6. render_start (use draft=true for a quick low-res check; burn_subtitles=true for captions), poll render_status until state is 'done', or render_cancel. export_subtitles writes an .srt/.vtt.
 Times are in seconds. Cut indices refer to get_edl. Use save_project to persist your work."
 )]
 impl ServerHandler for AutoladServer {}

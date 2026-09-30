@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { chooseExportPath } from "@/features/project/actions";
+import { chooseExportPath, chooseSubtitlesPath } from "@/features/project/actions";
 import { useTimelineStore } from "@/features/timeline/store";
 import { messageOf, notify } from "@/shared/notify";
 import { btn, btnPrimary } from "@/shared/ui/styles";
@@ -16,6 +16,10 @@ export function ExportControls() {
   const cancel = useExportStore((s) => s.cancel);
   const normalize = useExportStore((s) => s.normalize);
   const setNormalize = useExportStore((s) => s.setNormalize);
+  const captions = useExportStore((s) => s.captions);
+  const setCaptions = useExportStore((s) => s.setCaptions);
+  const writingSubtitles = useExportStore((s) => s.writingSubtitles);
+  const exportSubtitles = useExportStore((s) => s.exportSubtitles);
   const hasClips = useTimelineStore((s) => s.cuts.length > 0);
 
   const running = job?.state === "running";
@@ -24,6 +28,14 @@ export function ExportControls() {
     try {
       const output = await chooseExportPath(draft);
       if (output) await start(draft, output);
+    } catch (error) {
+      notify.error(messageOf(error));
+    }
+  };
+  const writeSubtitles = async () => {
+    try {
+      const output = await chooseSubtitlesPath();
+      if (output) await exportSubtitles(output);
     } catch (error) {
       notify.error(messageOf(error));
     }
@@ -73,6 +85,26 @@ export function ExportControls() {
         />
         Loudness
       </label>
+      <label
+        className="flex items-center gap-1.5 text-xs text-neutral-400"
+        title="Burn captions of the speech into the video"
+      >
+        <input
+          type="checkbox"
+          checked={captions}
+          onChange={(e) => setCaptions(e.target.checked)}
+          className="accent-sky-500"
+        />
+        Captions
+      </label>
+      <button
+        className={btn}
+        disabled={!hasClips || writingSubtitles}
+        onClick={() => void writeSubtitles()}
+        title="Save the subtitles of the edit as .srt or .vtt"
+      >
+        Subtitles…
+      </button>
       <button
         data-agent="export"
         className={btnPrimary}
