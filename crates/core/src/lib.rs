@@ -8,6 +8,7 @@ pub mod error;
 pub mod history;
 pub mod ports;
 pub mod segments;
+pub mod subtitles;
 pub mod transcript;
 
 pub use domain::{Asset, AssetId, Cut, Edl, Project, TimeRange};
