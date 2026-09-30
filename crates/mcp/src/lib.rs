@@ -6,6 +6,7 @@
 pub mod agent;
 pub mod base64;
 pub mod bridge;
+pub mod claude_setup;
 pub mod engine;
 pub mod error;
 pub mod jobs;

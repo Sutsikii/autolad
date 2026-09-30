@@ -5,9 +5,12 @@ export { commands as api, events };
 export type { Result };
 export type {
   AgentActivity,
+  AppConnection,
   AppError,
   Asset,
   AssetSummary,
+  ClaudeApp,
+  ClaudeSetup,
   CutSummary,
   Edl,
   EdlOp,

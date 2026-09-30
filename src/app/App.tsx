@@ -1,6 +1,7 @@
 import { AgentCursor } from "@/features/agent/AgentCursor";
 import { useAgentEvents } from "@/features/agent/useAgentEvents";
 import { usePing } from "@/features/automation/usePing";
+import { ConnectClaude } from "@/features/claude/ConnectClaude";
 import { ExportControls } from "@/features/export/ExportControls";
 import { LibraryPanel } from "@/features/library/LibraryPanel";
 import { useLibraryStore } from "@/features/library/store";
@@ -17,7 +18,10 @@ function TopBar() {
   return (
     <header className="flex h-11 shrink-0 items-center justify-between border-b border-black bg-[#1a1a1a] px-4">
       <ProjectMenu />
-      <ExportControls />
+      <div className="flex items-center gap-4">
+        <ConnectClaude />
+        <ExportControls />
+      </div>
     </header>
   );
 }

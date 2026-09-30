@@ -227,6 +227,25 @@ async renderCancel(jobId: string) : Promise<Result<JobStatus, AppError>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Whether Claude Desktop and Claude Code are installed, and already connected to AutoLad.
+ */
+async claudeSetup() : Promise<Result<ClaudeSetup, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("claude_setup") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async connectClaude(app: ClaudeApp) : Promise<Result<ClaudeSetup, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("connect_claude", { app }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -254,6 +273,15 @@ export type AgentPhase =
  * The agent just asked for the action; the UI has time to move a cursor there.
  */
 "started" | "finished" | "failed"
+export type AppConnection = { 
+/**
+ * The app is installed (Desktop: its config folder exists; Code: its CLI was found).
+ */
+installed: boolean; 
+/**
+ * AutoLad is registered there and points to this executable.
+ */
+connected: boolean }
 /**
  * Error surfaced to the front. Serialized as `{ kind, message }` so the UI can
  * branch on `kind` without parsing text.
@@ -274,6 +302,12 @@ export type AssetSummary = { id: string; path: string; duration: number;
  * `false` for silent clips: nothing to detect, transcribe or draw as a waveform.
  */
 has_audio: boolean; width: number | null; height: number | null; fps: number | null }
+export type ClaudeApp = "desktop" | "code"
+export type ClaudeSetup = { desktop: AppConnection; code: AppConnection; 
+/**
+ * Command that registers AutoLad in Claude Code by hand.
+ */
+code_command: string }
 /**
  * One kept portion of a source asset.
  */

@@ -74,6 +74,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::editor::render_start,
             commands::editor::render_status,
             commands::editor::render_cancel,
+            commands::claude::claude_setup,
+            commands::claude::connect_claude,
         ])
 }
 
