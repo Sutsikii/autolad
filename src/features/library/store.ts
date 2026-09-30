@@ -1,0 +1,37 @@
+import { create } from "zustand";
+import { api, call, type AssetSummary } from "@/ipc";
+import { cleanPath, fileName } from "@/shared/lib/path";
+import { messageOf, notify } from "@/shared/notify";
+
+interface LibraryState {
+  assets: AssetSummary[];
+  selectedId: string | null;
+  importing: number;
+  setAssets: (assets: AssetSummary[]) => void;
+  select: (id: string | null) => void;
+  importPath: (path: string) => Promise<void>;
+}
+
+export const useLibraryStore = create<LibraryState>((set, get) => ({
+  assets: [],
+  selectedId: null,
+  importing: 0,
+  setAssets: (assets) =>
+    set((s) => ({ assets, selectedId: s.selectedId ?? assets[0]?.id ?? null })),
+  select: (id) => set({ selectedId: id }),
+  importPath: async (raw) => {
+    const path = cleanPath(raw);
+    if (!path) return;
+    set((s) => ({ importing: s.importing + 1 }));
+    try {
+      const asset = await call(api.importMedia(path));
+      const known = get().assets.some((a) => a.id === asset.id);
+      set((s) => ({ assets: known ? s.assets : [...s.assets, asset], selectedId: asset.id }));
+      notify.info(known ? `${fileName(path)} is already imported` : `Imported ${fileName(path)}`);
+    } catch (error) {
+      notify.error(messageOf(error));
+    } finally {
+      set((s) => ({ importing: s.importing - 1 }));
+    }
+  },
+}));
