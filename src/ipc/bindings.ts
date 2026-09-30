@@ -66,6 +66,33 @@ async previewFrame(time: number, maxWidth: number) : Promise<Result<string, AppE
 }
 },
 /**
+ * Playback proxy of an asset. The front plays it through the asset protocol.
+ */
+async prepareProxy(assetId: string) : Promise<Result<string, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("prepare_proxy", { assetId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async prepareThumbnails(assetId: string) : Promise<Result<ThumbnailStrip, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("prepare_thumbnails", { assetId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async prepareWaveform(assetId: string) : Promise<Result<WaveformPeaks, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("prepare_waveform", { assetId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Renders next to the first source, so the UI needs no save dialog.
  */
 async renderStart(draft: boolean) : Promise<Result<string, AppError>> {
@@ -181,9 +208,21 @@ margin: number;
  */
 min_segment: number }
 /**
+ * Thumbnails of one asset laid out side by side in a single image.
+ */
+export type ThumbnailStrip = { path: string; 
+/**
+ * Seconds between two thumbnails: tile `i` shows the frame at `i * step`.
+ */
+step: number; tiles: number; tile_width: number; tile_height: number }
+/**
  * Half-open interval `[start, end)` in seconds on a source timeline.
  */
 export type TimeRange = { start: number; end: number }
+/**
+ * One byte per `1 / peaks_per_second` seconds, base64 encoded (a few tens of KB).
+ */
+export type WaveformPeaks = { peaks_per_second: number; base64: string }
 
 /** tauri-specta globals **/
 

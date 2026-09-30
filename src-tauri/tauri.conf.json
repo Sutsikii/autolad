@@ -13,7 +13,13 @@
     "windows": [
       { "title": "AutoLad", "width": 1280, "height": 800, "minWidth": 960, "minHeight": 600 }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPLOCALDATA/proxies/**", "$APPLOCALDATA/thumbs/**", "$APPLOCALDATA/waves/**"]
+      }
+    }
   },
   "bundle": {
     "active": true,

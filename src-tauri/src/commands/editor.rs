@@ -5,8 +5,11 @@ use autolad_core::edl_edit::EdlOp;
 use autolad_mcp::base64;
 use autolad_mcp::engine::{
     AssetSummary, BuildEdlRequest, EdlSummary, FrameTarget, ProjectStatus, RenderRequest,
+    ThumbnailStrip,
 };
 use autolad_mcp::jobs::JobStatus;
+use serde::Serialize;
+use specta::Type;
 use tauri::State;
 
 use crate::error::AppError;
@@ -68,6 +71,48 @@ pub async fn preview_frame(
         "data:image/png;base64,{}",
         base64::encode(&frame.png)
     ))
+}
+
+/// Playback proxy of an asset. The front plays it through the asset protocol.
+#[tauri::command]
+#[specta::specta]
+pub async fn prepare_proxy(
+    state: State<'_, AppState>,
+    asset_id: String,
+) -> Result<PathBuf, AppError> {
+    Ok(state.engine()?.ensure_proxy(&asset_id).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn prepare_thumbnails(
+    state: State<'_, AppState>,
+    asset_id: String,
+) -> Result<ThumbnailStrip, AppError> {
+    Ok(state.engine()?.ensure_thumbnails(&asset_id).await?)
+}
+
+/// One byte per `1 / peaks_per_second` seconds, base64 encoded (a few tens of KB).
+#[derive(Debug, Serialize, Type)]
+pub struct WaveformPeaks {
+    pub peaks_per_second: u32,
+    pub base64: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn prepare_waveform(
+    state: State<'_, AppState>,
+    asset_id: String,
+) -> Result<WaveformPeaks, AppError> {
+    let waveform = state.engine()?.ensure_waveform(&asset_id).await?;
+    let peaks = tokio::fs::read(&waveform.path)
+        .await
+        .map_err(|e| AppError::Internal(format!("{}: {e}", waveform.path.display())))?;
+    Ok(WaveformPeaks {
+        peaks_per_second: waveform.peaks_per_second,
+        base64: base64::encode(&peaks),
+    })
 }
 
 /// Renders next to the first source, so the UI needs no save dialog.
