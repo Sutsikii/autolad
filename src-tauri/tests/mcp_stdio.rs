@@ -182,6 +182,8 @@ fn handshake_and_tool_catalogue() {
         "build_silence_edl",
         "get_edl",
         "edit_edl",
+        "undo",
+        "redo",
         "preview_frame",
         "save_project",
         "open_project",
@@ -223,6 +225,12 @@ fn an_agent_can_edit_and_render_a_video() {
 
     let edited = client.call_ok("edit_edl", json!({"ops": [{"op": "delete", "index": 1}]}));
     assert_eq!(edited["cuts"].as_array().unwrap().len(), 1);
+
+    let undone = client.call_ok("undo", json!({}));
+    assert_eq!(undone["change"], "Delete clip 2");
+    assert_eq!(undone["edl"]["cuts"].as_array().unwrap().len(), 2);
+    let redone = client.call_ok("redo", json!({}));
+    assert_eq!(redone["edl"]["cuts"].as_array().unwrap().len(), 1);
 
     // The image comes back as MCP image content the agent can look at.
     let frame = client.call(

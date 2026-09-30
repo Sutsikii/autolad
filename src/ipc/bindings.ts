@@ -55,6 +55,25 @@ async editEdl(ops: EdlOp[]) : Promise<Result<EdlSummary, AppError>> {
 }
 },
 /**
+ * Reverts the last change to the timeline, the user's or an agent's.
+ */
+async undo() : Promise<Result<HistoryStep, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("undo") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async redo() : Promise<Result<HistoryStep, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("redo") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Frame of the edit at `time`, as a PNG data URL ready for an `<img>`.
  */
 async previewFrame(time: number, maxWidth: number) : Promise<Result<string, AppError>> {
@@ -257,7 +276,23 @@ export type EdlOp =
  * Removes every cut.
  */
 { op: "clear" }
-export type EdlSummary = { cuts: CutSummary[]; total_duration: number }
+export type EdlSummary = { cuts: CutSummary[]; total_duration: number; 
+/**
+ * Names of the changes `undo` and `redo` would revert or re-apply.
+ */
+history: HistoryStatus }
+/**
+ * What can be undone or redone next, for menus and for agents.
+ */
+export type HistoryStatus = { undo: string | null; redo: string | null }
+/**
+ * Result of `undo` / `redo`.
+ */
+export type HistoryStep = { 
+/**
+ * The change that was reverted (undo) or applied again (redo).
+ */
+change: string; edl: EdlSummary }
 export type JobStatus = ({ state: "running" } | { state: "done"; size_bytes: number } | { state: "failed"; error: string } | { state: "cancelled" }) & { id: string; output: string; 
 /**
  * Fraction in `[0, 1]`.

@@ -56,6 +56,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::editor::project_status,
             commands::editor::auto_cut,
             commands::editor::edit_edl,
+            commands::editor::undo,
+            commands::editor::redo,
             commands::editor::preview_frame,
             commands::editor::prepare_proxy,
             commands::editor::prepare_thumbnails,

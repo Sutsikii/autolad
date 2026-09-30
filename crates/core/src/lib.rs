@@ -5,6 +5,7 @@ pub mod domain;
 pub mod edl;
 pub mod edl_edit;
 pub mod error;
+pub mod history;
 pub mod ports;
 pub mod segments;
 

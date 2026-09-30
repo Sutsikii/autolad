@@ -106,6 +106,25 @@ fn apply_one(cuts: &mut Vec<Cut>, op: &EdlOp, assets: &[Asset]) -> Result<(), Co
     Ok(())
 }
 
+/// Short name of a batch for the undo menu; clip numbers are 1-based for humans.
+pub fn describe_ops(ops: &[EdlOp]) -> String {
+    let Some(first) = ops.first() else {
+        return "Edit the timeline".to_owned();
+    };
+    let label = match first {
+        EdlOp::Delete { index } => format!("Delete clip {}", index + 1),
+        EdlOp::Trim { index, .. } => format!("Trim clip {}", index + 1),
+        EdlOp::Split { index, .. } => format!("Split clip {}", index + 1),
+        EdlOp::Move { from, .. } => format!("Move clip {}", from + 1),
+        EdlOp::Insert { .. } => "Add a clip".to_owned(),
+        EdlOp::Clear => "Clear the timeline".to_owned(),
+    };
+    match ops.len() {
+        1 => label,
+        n => format!("{label} (+{} more)", n - 1),
+    }
+}
+
 fn check_index(index: usize, len: usize) -> Result<(), CoreError> {
     if index < len {
         Ok(())
@@ -298,6 +317,18 @@ mod tests {
             .unwrap()
             .cuts
             .is_empty());
+    }
+
+    #[test]
+    fn batches_are_named_after_their_first_op() {
+        assert_eq!(describe_ops(&[]), "Edit the timeline");
+        assert_eq!(describe_ops(&[EdlOp::Delete { index: 1 }]), "Delete clip 2");
+        let ops = [
+            EdlOp::Split { index: 0, at: 1.0 },
+            EdlOp::Clear,
+            EdlOp::Clear,
+        ];
+        assert_eq!(describe_ops(&ops), "Split clip 1 (+2 more)");
     }
 
     #[test]

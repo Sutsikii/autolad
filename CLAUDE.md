@@ -172,6 +172,8 @@ UPDATE_BINDINGS=1 cargo test -p autolad bindings   # regenerate src/ipc/bindings
 
 - Clips sans piste audio (captures d'écran…) : acceptés (`Asset.has_audio`). Pas de silences/transcription/forme d'onde pour eux (erreur explicite qui renvoie vers `edit_edl insert`), piste A1 marquée « no audio », et au rendu un silence est généré (`anullsrc`) pour garder un flux audio par cut dans le `concat`.
 
+- Undo/redo : l'`Engine` garde un historique de l'EDL (`core::history`, snapshots, 200 max, session seulement, remis à zéro par Nouveau/Ouvrir). Toute modif d'EDL passe par `State::commit` avec un libellé (`describe_ops`) ; une modif sans effet n'est pas enregistrée. UI (Ctrl+Z, Ctrl+Shift+Z/Ctrl+Y, boutons de la timeline) et agent (outils `undo`/`redo`) partagent le même historique ; `EdlSummary.history` dit ce qu'annuler/rétablir ferait. Les imports ne s'annulent pas.
+
 - Fichier projet : JSON versionné (`version: 1`), écrit atomiquement, autosauvegardé une fois lié par `save_project`. L'UI et l'agent partagent le même fichier lié ; « Nouveau » le délie (plus aucune écriture vers l'ancien fichier).
 - Modèle Whisper par défaut : `small` q5_1. Backend GPU : Vulkan.
 - ffmpeg : build GPL statique BtbN en sidecar.

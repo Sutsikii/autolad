@@ -11,6 +11,7 @@ export type {
   Edl,
   EdlOp,
   EdlSummary,
+  HistoryStatus,
   JobStatus,
   ProjectStatus,
   SilenceSettings,

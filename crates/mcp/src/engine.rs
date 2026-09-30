@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use autolad_core::edl::{build_silence_cut_edl, SilenceSettings};
-use autolad_core::edl_edit::{apply_ops, EdlOp};
+use autolad_core::edl_edit::{apply_ops, describe_ops, EdlOp};
+use autolad_core::history::{History, HistoryStatus};
 use autolad_core::ports::{RenderOptions, TranscriptSegment};
 use autolad_core::{Asset, AssetId, Edl, TimeRange};
 use autolad_media::frame::extract_frame;
@@ -38,6 +39,24 @@ struct State {
     project_path: Option<PathBuf>,
     /// Silence detection results, so repeated tuning of the EDL doesn't re-run ffmpeg.
     silences: HashMap<String, Vec<TimeRange>>,
+    /// Undo stack of the EDL, shared by the UI and agents. Lives for the session only.
+    history: History<Edl>,
+}
+
+impl State {
+    /// The single way the EDL changes, so every change can be undone. No-op edits are not
+    /// recorded: undoing them would seem to do nothing.
+    fn commit(&mut self, edl: Edl, label: impl Into<String>) {
+        if self.project.edl == edl {
+            return;
+        }
+        let before = std::mem::replace(&mut self.project.edl, edl);
+        self.history.record(before, label);
+    }
+
+    fn summary(&self) -> EdlSummary {
+        summarize_edl(&self.project.edl, self.history.status())
+    }
 }
 
 pub struct Engine {
@@ -113,6 +132,17 @@ pub struct CutSummary {
 pub struct EdlSummary {
     pub cuts: Vec<CutSummary>,
     pub total_duration: f64,
+    /// Names of the changes `undo` and `redo` would revert or re-apply.
+    pub history: HistoryStatus,
+}
+
+/// Result of `undo` / `redo`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct HistoryStep {
+    /// The change that was reverted (undo) or applied again (redo).
+    pub change: String,
+    pub edl: EdlSummary,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -293,7 +323,7 @@ impl Engine {
         let state = lock(&self.state);
         ProjectStatus {
             assets: state.project.assets.iter().map(summarize_asset).collect(),
-            edl: summarize_edl(&state.project.edl),
+            edl: state.summary(),
             project_file: state.project_path.clone(),
         }
     }
@@ -541,12 +571,15 @@ impl Engine {
 
         let summary = {
             let mut state = lock(&self.state);
-            if req.append {
-                state.project.edl.cuts.extend(built.cuts);
+            let edl = if req.append {
+                let mut edl = state.project.edl.clone();
+                edl.cuts.extend(built.cuts);
+                edl
             } else {
-                state.project.edl = built;
-            }
-            summarize_edl(&state.project.edl)
+                built
+            };
+            state.commit(edl, "Cut the silences");
+            state.summary()
         };
         self.persist().await?;
         Ok(BuildReport {
@@ -557,7 +590,7 @@ impl Engine {
     }
 
     pub fn edl_summary(&self) -> EdlSummary {
-        summarize_edl(&lock(&self.state).project.edl)
+        lock(&self.state).summary()
     }
 
     pub async fn edit_edl(&self, ops: Vec<EdlOp>) -> Result<EdlSummary, EngineError> {
@@ -570,11 +603,42 @@ impl Engine {
                 .map(|e| e.asset.clone())
                 .collect();
             let edited = apply_ops(&state.project.edl, &ops, &assets)?;
-            state.project.edl = edited;
-            summarize_edl(&state.project.edl)
+            state.commit(edited, describe_ops(&ops));
+            state.summary()
         };
         self.persist().await?;
         Ok(summary)
+    }
+
+    /// Reverts the last change to the EDL, whoever made it (UI or agent).
+    pub async fn undo(&self) -> Result<HistoryStep, EngineError> {
+        self.step_history(History::undo, "nothing to undo").await
+    }
+
+    /// Applies again the last undone change.
+    pub async fn redo(&self) -> Result<HistoryStep, EngineError> {
+        self.step_history(History::redo, "nothing to redo").await
+    }
+
+    async fn step_history(
+        &self,
+        step: fn(&mut History<Edl>, &mut Edl) -> Option<String>,
+        empty: &str,
+    ) -> Result<HistoryStep, EngineError> {
+        let result = {
+            let mut state = lock(&self.state);
+            let State {
+                project, history, ..
+            } = &mut *state;
+            let change = step(history, &mut project.edl)
+                .ok_or_else(|| EngineError::Invalid(empty.to_owned()))?;
+            HistoryStep {
+                change,
+                edl: state.summary(),
+            }
+        };
+        self.persist().await?;
+        Ok(result)
     }
 
     // ---- Preview -----------------------------------------------------------
@@ -692,7 +756,7 @@ impl Engine {
         *state = State {
             project,
             project_path: Some(path),
-            silences: HashMap::new(),
+            ..State::default()
         };
         Ok(report)
     }
@@ -827,7 +891,7 @@ fn summarize_asset(e: &AssetEntry) -> AssetSummary {
     }
 }
 
-pub fn summarize_edl(edl: &Edl) -> EdlSummary {
+pub fn summarize_edl(edl: &Edl, history: HistoryStatus) -> EdlSummary {
     let mut timeline_start = 0.0;
     let cuts = edl
         .cuts
@@ -850,6 +914,7 @@ pub fn summarize_edl(edl: &Edl) -> EdlSummary {
     EdlSummary {
         cuts,
         total_duration: edl.total_duration(),
+        history,
     }
 }
 
@@ -957,7 +1022,7 @@ mod tests {
         let edl = Edl {
             cuts: vec![cut(1.0, 3.0), cut(10.0, 13.0)],
         };
-        let summary = summarize_edl(&edl);
+        let summary = summarize_edl(&edl, HistoryStatus::default());
         assert_eq!(summary.cuts[0].timeline_start, 0.0);
         assert_eq!(summary.cuts[1].timeline_start, 2.0);
         assert_eq!(summary.cuts[1].index, 1);
@@ -1048,6 +1113,64 @@ mod tests {
         assert!(engine.find_transcript("zzz").is_none());
         // An id that merely starts like another one must not match it.
         assert_eq!(engine.find_transcript("abcd").unwrap().full_text, "autre");
+    }
+
+    fn engine_with_asset() -> Engine {
+        let engine = engine_with_transcripts(&[]);
+        lock(&engine.state)
+            .project
+            .assets
+            .push(entry(Some(640), Some(360), Some(25.0)));
+        engine
+    }
+
+    fn insert(start: f64, end: f64) -> EdlOp {
+        EdlOp::Insert {
+            index: 0,
+            asset: AssetId("a".into()),
+            start,
+            end,
+        }
+    }
+
+    #[tokio::test]
+    async fn edits_by_anyone_can_be_undone_and_redone() {
+        let engine = engine_with_asset();
+        engine.edit_edl(vec![insert(0.0, 4.0)]).await.unwrap();
+        let edited = engine
+            .edit_edl(vec![EdlOp::Split { index: 0, at: 2.0 }])
+            .await
+            .unwrap();
+        assert_eq!(edited.cuts.len(), 2);
+        assert_eq!(edited.history.undo.as_deref(), Some("Split clip 1"));
+
+        let undone = engine.undo().await.unwrap();
+        assert_eq!(undone.change, "Split clip 1");
+        assert_eq!(undone.edl.cuts.len(), 1);
+        assert_eq!(undone.edl.history.redo.as_deref(), Some("Split clip 1"));
+
+        let redone = engine.redo().await.unwrap();
+        assert_eq!(redone.edl.cuts.len(), 2);
+
+        engine.undo().await.unwrap();
+        engine.undo().await.unwrap();
+        assert!(engine.edl_summary().cuts.is_empty());
+        assert!(matches!(engine.undo().await, Err(EngineError::Invalid(_))));
+    }
+
+    #[tokio::test]
+    async fn edits_that_change_nothing_are_not_recorded() {
+        let engine = engine_with_asset();
+        engine.edit_edl(vec![EdlOp::Clear]).await.unwrap();
+        assert_eq!(engine.edl_summary().history, HistoryStatus::default());
+    }
+
+    #[tokio::test]
+    async fn a_new_project_forgets_the_history() {
+        let engine = engine_with_asset();
+        engine.edit_edl(vec![insert(0.0, 1.0)]).await.unwrap();
+        engine.new_project();
+        assert!(engine.undo().await.is_err());
     }
 
     #[test]

@@ -6,7 +6,12 @@ import {
   saveProject,
   saveProjectAs,
 } from "@/features/project/actions";
-import { deleteSelected, moveSelected, splitAtPlayhead } from "@/features/timeline/actions";
+import {
+  deleteSelected,
+  moveSelected,
+  splitAtPlayhead,
+  stepHistory,
+} from "@/features/timeline/actions";
 import { nextCutStart, previousCutStart } from "@/features/timeline/layout";
 import { useTimelineStore } from "@/features/timeline/store";
 import { TIMELINE_FPS } from "@/shared/lib/timecode";
@@ -63,9 +68,15 @@ function handleKey(event: KeyboardEvent): boolean {
   }
 }
 
-/** File shortcuts (Ctrl+N/O/S). */
-function handleFileKey(event: KeyboardEvent): boolean {
+/** File and history shortcuts (Ctrl+N/O/S, Ctrl+Z/Y). */
+function handleCtrlKey(event: KeyboardEvent): boolean {
   switch (event.code) {
+    case "KeyZ":
+      void stepHistory(event.shiftKey ? "redo" : "undo");
+      return true;
+    case "KeyY":
+      void stepHistory("redo");
+      return true;
     case "KeyN":
       void newProject();
       return true;
@@ -84,7 +95,9 @@ export function useShortcuts(): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.ctrlKey || event.metaKey) {
-        if (handleFileKey(event)) event.preventDefault();
+        // Text fields keep their own undo.
+        const textUndo = isTyping(event.target) && ["KeyZ", "KeyY"].includes(event.code);
+        if (!textUndo && handleCtrlKey(event)) event.preventDefault();
         return;
       }
       if (isTyping(event.target)) return;

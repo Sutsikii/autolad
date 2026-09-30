@@ -10,11 +10,18 @@ const edl = (durations: number[]): EdlSummary => {
     at += duration;
     return cut;
   });
-  return { cuts, total_duration: at };
+  return { cuts, total_duration: at, history: { undo: "Split clip 1", redo: null } };
 };
 
 describe("timeline store", () => {
   beforeEach(() => useTimelineStore.getState().reset());
+
+  it("keeps what undo would revert", () => {
+    useTimelineStore.getState().setEdl(edl([1]));
+    expect(useTimelineStore.getState().history.undo).toBe("Split clip 1");
+    useTimelineStore.getState().reset();
+    expect(useTimelineStore.getState().history.undo).toBeNull();
+  });
 
   it("keeps the playhead inside the edit", () => {
     const { setEdl, seek } = useTimelineStore.getState();

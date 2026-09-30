@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CutSummary, EdlSummary } from "@/ipc";
+import type { CutSummary, EdlSummary, HistoryStatus } from "@/ipc";
 import { clamp, DEFAULT_ZOOM, fitZoom, MAX_ZOOM, MIN_ZOOM } from "./layout";
 
 interface TimelineState {
@@ -9,6 +9,8 @@ interface TimelineState {
   selected: number | null;
   pxPerSec: number;
   scrollX: number;
+  /** What Undo / Redo would revert or re-apply (the backend owns the history). */
+  history: HistoryStatus;
   /** Bumped on every edit so the preview refetches even if the playhead did not move. */
   version: number;
   setEdl: (edl: EdlSummary) => void;
@@ -28,6 +30,7 @@ const INITIAL = {
   selected: null,
   pxPerSec: DEFAULT_ZOOM,
   scrollX: 0,
+  history: { undo: null, redo: null },
   version: 0,
 };
 
@@ -39,6 +42,7 @@ export const useTimelineStore = create<TimelineState>((set) => ({
       duration: edl.total_duration,
       playhead: clamp(s.playhead, 0, edl.total_duration),
       selected: s.selected !== null && s.selected < edl.cuts.length ? s.selected : null,
+      history: edl.history,
       version: s.version + 1,
     })),
   seek: (time) => set((s) => ({ playhead: clamp(time, 0, s.duration) })),

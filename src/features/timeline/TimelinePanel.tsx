@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Panel } from "@/shared/ui/Panel";
 import { btn } from "@/shared/ui/styles";
 import { formatTimecode } from "@/shared/lib/timecode";
-import { deleteSelected, moveSelected, splitAtPlayhead } from "./actions";
+import { deleteSelected, moveSelected, splitAtPlayhead, stepHistory } from "./actions";
 import { MAX_ZOOM, MIN_ZOOM } from "./layout";
 import { useTimelineStore } from "./store";
 import { TimelineCanvas } from "./TimelineCanvas";
@@ -14,9 +14,29 @@ export function TimelinePanel() {
   const duration = useTimelineStore((s) => s.duration);
   const clipCount = useTimelineStore((s) => s.cuts.length);
   const selected = useTimelineStore((s) => s.selected);
+  const history = useTimelineStore((s) => s.history);
 
   const toolbar = (
     <div className="flex items-center gap-1.5">
+      <button
+        className={btn}
+        data-agent="undo"
+        disabled={history.undo === null}
+        onClick={() => void stepHistory("undo")}
+        title={history.undo ? `Undo: ${history.undo} (Ctrl+Z)` : "Nothing to undo"}
+      >
+        Undo
+      </button>
+      <button
+        className={btn}
+        data-agent="redo"
+        disabled={history.redo === null}
+        onClick={() => void stepHistory("redo")}
+        title={history.redo ? `Redo: ${history.redo} (Ctrl+Shift+Z)` : "Nothing to redo"}
+      >
+        Redo
+      </button>
+      <span className="mx-1 h-4 w-px bg-neutral-700" />
       <button className={btn} onClick={() => void splitAtPlayhead()} title="Split at playhead (S)">
         Split
       </button>

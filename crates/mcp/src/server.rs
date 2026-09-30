@@ -386,6 +386,20 @@ impl AutoladServer {
     }
 
     #[tool(
+        description = "Undo the last change to the EDL, whether you or the user made it. Returns what was undone and the new EDL. get_edl tells what undo/redo would do next."
+    )]
+    async fn undo(&self) -> Result<CallToolResult, ErrorData> {
+        let step = Step::new("undo", "Undoing the last change", true);
+        self.run(step, self.engine.undo()).await
+    }
+
+    #[tool(description = "Redo the last change that was undone.")]
+    async fn redo(&self) -> Result<CallToolResult, ErrorData> {
+        let step = Step::new("redo", "Redoing the change", true);
+        self.run(step, self.engine.redo()).await
+    }
+
+    #[tool(
         description = "See a single frame as an image: either a moment of the edit (timeline_time) or of a source file (asset_id + source_time). Use it to check cuts visually."
     )]
     async fn preview_frame(
@@ -507,7 +521,7 @@ AutoLad edits videos locally. Typical workflow:
 2. detect_silences to inspect pauses, and/or transcribe to read what is said.
 3. build_silence_edl to cut the silences out automatically (creates the EDL, the ordered list of kept ranges).
 4. Look at the result: get_edl for the cut list, preview_frame to see any moment of the source or of the edit.
-5. Refine with edit_edl (delete / trim / split / move / insert cuts; a batch is applied atomically).
+5. Refine with edit_edl (delete / trim / split / move / insert cuts; a batch is applied atomically). Any change can be reverted with undo (and redo), including the user's.
 6. render_start (use draft=true for a quick low-res check), poll render_status until state is 'done', or render_cancel.
 Times are in seconds. Cut indices refer to get_edl. Use save_project to persist your work."
 )]

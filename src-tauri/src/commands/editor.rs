@@ -4,7 +4,7 @@ use autolad_core::edl::SilenceSettings;
 use autolad_core::edl_edit::EdlOp;
 use autolad_mcp::base64;
 use autolad_mcp::engine::{
-    AssetSummary, BuildEdlRequest, EdlSummary, FrameTarget, OpenReport, ProjectStatus,
+    AssetSummary, BuildEdlRequest, EdlSummary, FrameTarget, HistoryStep, OpenReport, ProjectStatus,
     RenderRequest, ThumbnailStrip, TranscribeRequest, TranscriptReport,
 };
 use autolad_mcp::jobs::JobStatus;
@@ -53,6 +53,19 @@ pub async fn auto_cut(
 #[specta::specta]
 pub async fn edit_edl(state: State<'_, AppState>, ops: Vec<EdlOp>) -> Result<EdlSummary, AppError> {
     Ok(state.engine()?.edit_edl(ops).await?)
+}
+
+/// Reverts the last change to the timeline, the user's or an agent's.
+#[tauri::command]
+#[specta::specta]
+pub async fn undo(state: State<'_, AppState>) -> Result<HistoryStep, AppError> {
+    Ok(state.engine()?.undo().await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn redo(state: State<'_, AppState>) -> Result<HistoryStep, AppError> {
+    Ok(state.engine()?.redo().await?)
 }
 
 /// Frame of the edit at `time`, as a PNG data URL ready for an `<img>`.

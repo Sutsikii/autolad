@@ -15,6 +15,17 @@ async function applyOps(ops: EdlOp[]): Promise<boolean> {
   }
 }
 
+/** Undo / redo the last timeline change, whoever made it (the user or an agent). */
+export async function stepHistory(direction: "undo" | "redo"): Promise<void> {
+  try {
+    const step = await call(direction === "undo" ? api.undo() : api.redo());
+    useTimelineStore.getState().setEdl(step.edl);
+    notify.info(`${direction === "undo" ? "Undid" : "Redid"}: ${step.change}`);
+  } catch (error) {
+    notify.error(messageOf(error));
+  }
+}
+
 export async function addAssetToTimeline(asset: AssetSummary): Promise<void> {
   const { cuts } = useTimelineStore.getState();
   const added = await applyOps([
