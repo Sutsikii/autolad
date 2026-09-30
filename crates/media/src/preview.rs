@@ -12,8 +12,9 @@ pub const PROXY_HEIGHT: u32 = 540;
 /// Short GOP: seeking inside the proxy decodes at most half a second of frames.
 const PROXY_GOP: u32 = 15;
 
-pub const TILE_WIDTH: u32 = 78;
 pub const TILE_HEIGHT: u32 = 44;
+const MIN_TILE_WIDTH: u32 = 24;
+const MAX_TILE_WIDTH: u32 = 120;
 const MAX_TILES: u32 = 240;
 const MIN_STEP: f64 = 0.5;
 
@@ -25,6 +26,17 @@ const PCM_RATE: u32 = 8_000;
 pub struct StripLayout {
     pub step: f64,
     pub tiles: u32,
+}
+
+/// Width of one thumbnail so that it has the shape of the picture: a portrait phone clip gets
+/// narrow tiles instead of a cropped landscape window onto it. Clamped for extreme shapes.
+pub fn tile_width(width: Option<u32>, height: Option<u32>) -> u32 {
+    let aspect = match (width, height) {
+        (Some(w), Some(h)) if w > 0 && h > 0 => f64::from(w) / f64::from(h),
+        _ => 16.0 / 9.0,
+    };
+    let fitted = (f64::from(TILE_HEIGHT) * aspect).round() as u32;
+    fitted.clamp(MIN_TILE_WIDTH, MAX_TILE_WIDTH)
 }
 
 pub fn strip_layout(duration: f64) -> StripLayout {
@@ -45,7 +57,10 @@ pub async fn build_proxy(
     source: &Path,
     output: &Path,
 ) -> Result<(), MediaError> {
-    let scale = format!("scale=-2:'min({PROXY_HEIGHT},ih)'");
+    // Square pixels first (anamorphic footage) and even sides (yuv420p cannot encode odd ones);
+    // then cap the height. The decoder already applies the rotation flag of phone videos.
+    let scale =
+        format!("scale='trunc(iw*sar/2)*2':'trunc(ih/2)*2',scale=-2:'min({PROXY_HEIGHT},ih)'");
     let gop = PROXY_GOP.to_string();
     publish(output, |part| {
         let mut cmd = command(&binaries.ffmpeg);
@@ -70,10 +85,12 @@ pub async fn build_thumbnail_strip(
     proxy: &Path,
     output: &Path,
     layout: StripLayout,
+    tile_width: u32,
 ) -> Result<(), MediaError> {
     let filter = format!(
-        "tpad=stop_mode=clone:stop_duration={pad},fps=1/{step},scale={TILE_WIDTH}:{TILE_HEIGHT}:force_original_aspect_ratio=increase,\
-         crop={TILE_WIDTH}:{TILE_HEIGHT},tile={tiles}x1",
+        "tpad=stop_mode=clone:stop_duration={pad},fps=1/{step},\
+         scale={tile_width}:{TILE_HEIGHT}:force_original_aspect_ratio=increase,\
+         crop={tile_width}:{TILE_HEIGHT},tile={tiles}x1",
         step = layout.step,
         // The last keyframe sits before the end of the file: without padding the final tiles
         // would stay black.
@@ -181,6 +198,19 @@ fn part_path(output: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thumbnails_follow_the_shape_of_the_picture() {
+        assert_eq!(tile_width(Some(1920), Some(1080)), 78);
+        assert_eq!(tile_width(Some(1080), Some(1920)), 25);
+        assert_eq!(tile_width(Some(1000), Some(1000)), 44);
+        // Extreme shapes stay usable.
+        assert_eq!(tile_width(Some(100), Some(4000)), 24);
+        assert_eq!(tile_width(Some(4000), Some(100)), 120);
+        // Unknown size: assume widescreen.
+        assert_eq!(tile_width(None, None), 78);
+        assert_eq!(tile_width(Some(0), Some(0)), 78);
+    }
 
     #[test]
     fn short_clips_get_one_tile_per_half_second() {

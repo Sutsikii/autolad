@@ -256,7 +256,7 @@ async fn editor_media_is_built_from_a_real_clip() {
 
     let strip = dir.join("strip.jpg");
     let layout = strip_layout(info.duration);
-    build_thumbnail_strip(&b, &proxy, &strip, layout)
+    build_thumbnail_strip(&b, &proxy, &strip, layout, 78)
         .await
         .unwrap();
     assert!(std::fs::metadata(&strip).unwrap().len() > 0);

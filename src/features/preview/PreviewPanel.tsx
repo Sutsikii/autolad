@@ -1,11 +1,15 @@
 import { useRef } from "react";
+import type { AssetSummary } from "@/ipc";
 import { useMediaStore } from "@/features/library/mediaStore";
+import { useLibraryStore } from "@/features/library/store";
 import { nextCutStart, previousCutStart } from "@/features/timeline/layout";
 import { useTimelineStore } from "@/features/timeline/store";
+import { useElementSize } from "@/shared/hooks/useElementSize";
 import { formatTimecode } from "@/shared/lib/timecode";
 import { cn } from "@/shared/lib/utils";
 import { Panel } from "@/shared/ui/Panel";
 import { btn } from "@/shared/ui/styles";
+import { fitInside, sequenceSize } from "./frame";
 import { usePreviewStore } from "./store";
 import { locateForDisplay } from "./sync";
 import { useVideoMonitor } from "./useVideoMonitor";
@@ -24,6 +28,14 @@ export function PreviewPanel() {
   const seek = useTimelineStore((s) => s.seek);
   const empty = cuts.length === 0;
 
+  // The frame has the shape of the sequence (its first clip, like an export); clips of another
+  // shape get bars inside it, exactly as they will in the exported file.
+  const firstAssetId = cuts[0]?.asset;
+  const firstAsset = useLibraryStore((s) => s.assets.find((a) => a.id === firstAssetId));
+  const sequence = sequenceSize(firstAsset);
+  const [stageRef, stage] = useElementSize<HTMLDivElement>();
+  const frame = fitInside(stage, sequence.width / sequence.height);
+
   // The proxy plays smoothly with sound; until it is encoded, single PNG frames stand in.
   const assetId = locateForDisplay(cuts, playhead)?.cut.asset;
   const proxyReady = useMediaStore((s) => Boolean(assetId && s.byAsset[assetId]?.proxyUrl));
@@ -32,20 +44,27 @@ export function PreviewPanel() {
   const { src, error } = usePreviewFrame(!proxyReady);
 
   return (
-    <Panel title="Program" className="flex-1">
+    <Panel title="Program" actions={sequenceLabel(empty ? undefined : firstAsset)} className="flex-1">
       <div
+        ref={stageRef}
         data-agent="monitor"
-        className="relative flex min-h-0 flex-1 items-center justify-center bg-black"
+        className="relative flex min-h-0 flex-1 items-center justify-center bg-[#0d0d0d]"
       >
-        <video
-          ref={videoRef}
-          playsInline
-          preload="auto"
-          className={cn("max-h-full max-w-full object-contain", !proxyReady && "hidden")}
-        />
-        {!proxyReady && src && (
-          <img src={src} alt="Program monitor" className="max-h-full max-w-full object-contain" />
-        )}
+        <div
+          data-testid="program-frame"
+          className={cn("relative bg-black ring-1 ring-white/10", empty && "hidden")}
+          style={{ width: frame.width, height: frame.height }}
+        >
+          <video
+            ref={videoRef}
+            playsInline
+            preload="auto"
+            className={cn("h-full w-full object-contain", !proxyReady && "hidden")}
+          />
+          {!proxyReady && src && (
+            <img src={src} alt="Program monitor" className="h-full w-full object-contain" />
+          )}
+        </div>
         {!proxyReady && !src && (
           <p className="px-6 text-center text-xs leading-relaxed text-neutral-600">
             {empty
@@ -102,5 +121,17 @@ export function PreviewPanel() {
         </span>
       </div>
     </Panel>
+  );
+}
+
+/** "1080×1920 · 30 fps": what the export will be, next to the monitor. */
+function sequenceLabel(asset: AssetSummary | undefined) {
+  if (!asset?.width || !asset.height) return undefined;
+  const fps = asset.fps ? ` · ${Number(asset.fps.toFixed(2))} fps` : "";
+  return (
+    <span className="font-mono text-[11px] text-neutral-500" title="Size of the exported video">
+      {asset.width}×{asset.height}
+      {fps}
+    </span>
   );
 }

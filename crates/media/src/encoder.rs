@@ -22,6 +22,25 @@ impl Encoder {
         }
     }
 
+    /// Hardware encoders only accept frames inside a range (NVENC refuses tiny ones and
+    /// H.264 tops out at 4096); libx264 takes any even size, so it covers the rest.
+    pub fn for_size(self, width: u32, height: u32) -> Encoder {
+        const HARDWARE_MIN: (u32, u32) = (256, 144);
+        const HARDWARE_MAX: u32 = 4096;
+        let fits = |w: u32, h: u32| {
+            w >= HARDWARE_MIN.0 && h >= HARDWARE_MIN.1 && w <= HARDWARE_MAX && h <= HARDWARE_MAX
+        };
+        if self == Encoder::X264 || fits(width, height) {
+            self
+        } else {
+            Encoder::X264
+        }
+    }
+
+    pub fn is_hardware(self) -> bool {
+        self != Encoder::X264
+    }
+
     /// Video encoding arguments, tuned to look close to `libx264 -crf 20`.
     pub fn args(self) -> Vec<&'static str> {
         match self {
@@ -70,6 +89,31 @@ impl Encoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hardware_is_kept_only_for_sizes_it_can_encode() {
+        let hw = Encoder::Nvenc;
+        assert_eq!(hw.for_size(1920, 1080), hw);
+        assert_eq!(hw.for_size(1080, 1920), hw);
+        assert_eq!(hw.for_size(4096, 2160), hw);
+        // Too small for NVENC, too big for H.264 hardware: software takes over.
+        assert_eq!(hw.for_size(96, 54), Encoder::X264);
+        assert_eq!(hw.for_size(54, 96), Encoder::X264);
+        assert_eq!(hw.for_size(7680, 4320), Encoder::X264);
+        assert_eq!(hw.for_size(4320, 7680), Encoder::X264);
+        // Software has no such limit.
+        assert_eq!(Encoder::X264.for_size(96, 54), Encoder::X264);
+    }
+
+    #[test]
+    fn only_the_software_encoder_is_not_hardware() {
+        assert!(
+            Encoder::Nvenc.is_hardware()
+                && Encoder::Qsv.is_hardware()
+                && Encoder::Amf.is_hardware()
+        );
+        assert!(!Encoder::X264.is_hardware());
+    }
 
     #[test]
     fn every_encoder_selects_its_codec() {

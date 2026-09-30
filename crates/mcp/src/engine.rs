@@ -13,8 +13,8 @@ use autolad_core::{Asset, AssetId, Edl, TimeRange};
 use autolad_media::frame::extract_frame;
 use autolad_media::hash::hash_file;
 use autolad_media::preview::{
-    build_proxy, build_thumbnail_strip, build_waveform, strip_layout, PEAKS_PER_SECOND,
-    TILE_HEIGHT, TILE_WIDTH,
+    build_proxy, build_thumbnail_strip, build_waveform, strip_layout, tile_width, PEAKS_PER_SECOND,
+    TILE_HEIGHT,
 };
 use autolad_media::{Binaries, Encoder, FfmpegAnalyzer, FfmpegRenderer, FfprobeProbe};
 use autolad_transcribe::{ModelStore, TranscribeOptions, WhisperModel, WhisperTranscriber};
@@ -28,7 +28,7 @@ use crate::project_file::{AssetEntry, ProjectFile};
 const DEFAULT_NOISE_DB: f64 = -30.0;
 const DEFAULT_MIN_SILENCE: f64 = 0.3;
 const ASSET_ID_LEN: usize = 12;
-const DRAFT_WIDTH: u32 = 640;
+const DRAFT_LONG_SIDE: u32 = 640;
 const DRAFT_MAX_FPS: f64 = 30.0;
 
 #[derive(Default)]
@@ -339,16 +339,20 @@ impl Engine {
     pub async fn ensure_thumbnails(&self, asset_id: &str) -> Result<ThumbnailStrip, EngineError> {
         let entry = self.entry(asset_id)?;
         let layout = strip_layout(entry.asset.duration);
-        let output = self.cache_file("thumbs", asset_id, "jpg").await?;
+        let tile = tile_width(entry.width, entry.height);
+        // The tile width is part of the name: a strip built for another shape must not be reused.
+        let output = self
+            .cache_file("thumbs", &format!("{asset_id}-{tile}"), "jpg")
+            .await?;
         if !is_file(&output).await {
             let proxy = self.ensure_proxy(asset_id).await?;
-            build_thumbnail_strip(&self.binaries, &proxy, &output, layout).await?;
+            build_thumbnail_strip(&self.binaries, &proxy, &output, layout, tile).await?;
         }
         Ok(ThumbnailStrip {
             path: output,
             step: layout.step,
             tiles: layout.tiles,
-            tile_width: TILE_WIDTH,
+            tile_width: tile,
             tile_height: TILE_HEIGHT,
         })
     }
@@ -819,16 +823,20 @@ fn validate_output(
 }
 
 /// Output size and frame rate: explicit request, else the first asset's, else 1080p30.
-/// Drafts shrink to 640 px wide and cap the frame rate for fast previews.
+/// Drafts shrink so the longer side is at most 640 px (a portrait phone video becomes 360x640,
+/// not a huge 640 px wide frame) and cap the frame rate for fast previews.
 fn resolve_options(first: &AssetEntry, req: &RenderRequest) -> Result<RenderOptions, EngineError> {
     let mut width = req.width.or(first.width).unwrap_or(1920);
     let mut height = req.height.or(first.height).unwrap_or(1080);
     let mut fps = req.fps.or(first.fps).unwrap_or(30.0);
 
     if req.draft {
-        if req.width.is_none() && req.height.is_none() && width > DRAFT_WIDTH {
-            height = (u64::from(height) * u64::from(DRAFT_WIDTH) / u64::from(width.max(1))) as u32;
-            width = DRAFT_WIDTH;
+        let longer = width.max(height);
+        if req.width.is_none() && req.height.is_none() && longer > DRAFT_LONG_SIDE {
+            let shrink = |side: u32| {
+                (u64::from(side) * u64::from(DRAFT_LONG_SIDE) / u64::from(longer)) as u32
+            };
+            (width, height) = (shrink(width), shrink(height));
         }
         fps = fps.min(DRAFT_MAX_FPS);
     }
@@ -907,7 +915,7 @@ mod tests {
     }
 
     #[test]
-    fn draft_shrinks_to_640_wide_with_even_dimensions_and_capped_fps() {
+    fn draft_shrinks_the_longer_side_to_640_with_even_dimensions_and_capped_fps() {
         let o = resolve_options(&entry(Some(1920), Some(1080), Some(60.0)), &req(true)).unwrap();
         assert_eq!((o.width, o.height), (640, 360));
         assert_eq!(o.fps, 30.0);
@@ -916,6 +924,20 @@ mod tests {
         let o = resolve_options(&entry(Some(1000), Some(667), Some(25.0)), &req(true)).unwrap();
         assert_eq!(o.width % 2, 0);
         assert_eq!(o.height % 2, 0);
+    }
+
+    #[test]
+    fn a_portrait_draft_is_tall_not_wide() {
+        let o = resolve_options(&entry(Some(1080), Some(1920), Some(30.0)), &req(true)).unwrap();
+        assert_eq!((o.width, o.height), (360, 640));
+    }
+
+    #[test]
+    fn a_draft_never_enlarges_a_small_video() {
+        let o = resolve_options(&entry(Some(320), Some(180), Some(24.0)), &req(true)).unwrap();
+        assert_eq!((o.width, o.height), (320, 180));
+        let o = resolve_options(&entry(Some(180), Some(320), Some(24.0)), &req(true)).unwrap();
+        assert_eq!((o.width, o.height), (180, 320));
     }
 
     #[test]

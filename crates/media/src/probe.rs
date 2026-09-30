@@ -61,6 +61,23 @@ struct Stream {
     r_frame_rate: Option<String>,
     duration: Option<String>,
     disposition: Option<Disposition>,
+    /// Pixel shape, `"4:3"` for anamorphic footage; `"0:1"` or missing means square.
+    sample_aspect_ratio: Option<String>,
+    #[serde(default)]
+    side_data_list: Vec<SideData>,
+    tags: Option<StreamTags>,
+}
+
+#[derive(Deserialize)]
+struct SideData {
+    /// Phones record how they were held here (recent ffprobe).
+    rotation: Option<f64>,
+}
+
+#[derive(Deserialize)]
+struct StreamTags {
+    /// Same information, older container convention.
+    rotate: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -99,13 +116,59 @@ pub fn parse_probe(json: &str) -> Result<MediaInfo, MediaError> {
             .find_map(parse_rate)
     });
 
+    let size = video.and_then(|v| {
+        let sar = v.sample_aspect_ratio.as_deref().map_or(1.0, parse_sar);
+        display_size(v.width?, v.height?, sar, rotation_of(v))
+    });
+
     Ok(MediaInfo {
         duration,
         has_audio,
         has_video: video.is_some(),
-        width: video.and_then(|v| v.width),
-        height: video.and_then(|v| v.height),
+        width: size.map(|s| s.0),
+        height: size.map(|s| s.1),
         fps,
+    })
+}
+
+/// Clockwise quarter turns to apply for display, as degrees in `{0, 90, 180, 270}`.
+fn rotation_of(stream: &Stream) -> u32 {
+    let degrees = stream
+        .side_data_list
+        .iter()
+        .find_map(|d| d.rotation)
+        .or_else(|| {
+            let tag = stream.tags.as_ref()?.rotate.as_deref()?;
+            tag.trim().parse::<f64>().ok()
+        })
+        .unwrap_or(0.0);
+    // ffprobe reports counter-clockwise angles (-90 = a clockwise quarter turn); only the axis
+    // matters for the size, so the sign is irrelevant here.
+    (degrees.round() as i64).rem_euclid(360) as u32
+}
+
+/// ffprobe writes `4:3` (or `4/3`); `0:1`, garbage and non-positive ratios mean square pixels.
+fn parse_sar(text: &str) -> f64 {
+    let Some((num, den)) = text.split_once([':', '/']) else {
+        return 1.0;
+    };
+    match (num.parse::<f64>(), den.parse::<f64>()) {
+        (Ok(n), Ok(d)) if n > 0.0 && d > 0.0 => n / d,
+        _ => 1.0,
+    }
+}
+
+/// Size of the picture as a viewer sees it: pixel shape applied, then the rotation flag.
+/// The coded size alone would make a phone video look landscape and a 4:3 stretch look square.
+fn display_size(width: u32, height: u32, sar: f64, rotation: u32) -> Option<(u32, u32)> {
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let shaped = (f64::from(width) * sar).round().max(1.0) as u32;
+    Some(if rotation == 90 || rotation == 270 {
+        (height, shaped)
+    } else {
+        (shaped, height)
     })
 }
 
@@ -159,6 +222,51 @@ mod tests {
         let info = parse_probe(json).unwrap();
         assert_eq!(info.duration, 4.0);
         assert_eq!(info.fps, Some(25.0));
+    }
+
+    fn size_of(stream: &str) -> (Option<u32>, Option<u32>) {
+        let json = format!(r#"{{"streams":[{stream}],"format":{{"duration":"2.0"}}}}"#);
+        let info = parse_probe(&json).unwrap();
+        (info.width, info.height)
+    }
+
+    #[test]
+    fn a_phone_video_flagged_as_rotated_is_portrait() {
+        let modern = r#"{"codec_type":"video","width":1920,"height":1080,
+            "side_data_list":[{"side_data_type":"Display Matrix","rotation":-90}]}"#;
+        assert_eq!(size_of(modern), (Some(1080), Some(1920)));
+        let legacy = r#"{"codec_type":"video","width":1920,"height":1080,"tags":{"rotate":"270"}}"#;
+        assert_eq!(size_of(legacy), (Some(1080), Some(1920)));
+        let upside_down = r#"{"codec_type":"video","width":1920,"height":1080,
+            "side_data_list":[{"rotation":180}]}"#;
+        assert_eq!(size_of(upside_down), (Some(1920), Some(1080)));
+    }
+
+    #[test]
+    fn anamorphic_pixels_are_applied_to_the_width() {
+        let pal =
+            r#"{"codec_type":"video","width":720,"height":576,"sample_aspect_ratio":"16:15"}"#;
+        assert_eq!(size_of(pal), (Some(768), Some(576)));
+        let hdv =
+            r#"{"codec_type":"video","width":1440,"height":1080,"sample_aspect_ratio":"4:3"}"#;
+        assert_eq!(size_of(hdv), (Some(1920), Some(1080)));
+    }
+
+    #[test]
+    fn unknown_or_broken_pixel_shapes_mean_square_pixels() {
+        for sar in ["0:1", "N/A", "abc:def", "-3:2", "5"] {
+            let stream = format!(
+                r#"{{"codec_type":"video","width":640,"height":360,"sample_aspect_ratio":"{sar}"}}"#
+            );
+            assert_eq!(size_of(&stream), (Some(640), Some(360)), "{sar}");
+        }
+    }
+
+    #[test]
+    fn pixel_shape_and_rotation_combine() {
+        let both = r#"{"codec_type":"video","width":1440,"height":1080,"sample_aspect_ratio":"4:3",
+            "side_data_list":[{"rotation":90}]}"#;
+        assert_eq!(size_of(both), (Some(1080), Some(1920)));
     }
 
     #[test]

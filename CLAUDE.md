@@ -166,6 +166,8 @@ UPDATE_BINDINGS=1 cargo test -p autolad bindings   # regenerate src/ipc/bindings
 
 ## Décisions prises
 
+- Toutes tailles de vidéo : `MediaInfo.width/height` = taille *affichée* (rotation smartphone et pixels anamorphiques appliqués, cf. `probe.rs`) ; proxy, PNG de preview et rendu passent par `scale=iw*sar:ih` (pixels carrés) et des côtés pairs. Export par défaut = taille du premier clip ; brouillon = côté le plus long ≤ 640 (un portrait devient 360×640). Encodeur matériel seulement entre 256×144 et 4096, libx264 sinon, et repli automatique sur libx264 si un encodeur matériel échoue. Vignettes : largeur de tuile proportionnelle à la forme de l'image (`tile_width`, dans le nom du fichier en cache). Le cadre du moniteur a la forme de la séquence (premier clip) ; les clips d'une autre forme y sont encadrés de barres, comme au rendu. Cas couverts par le test `every_video_shape_is_imported_previewed_and_exported_at_the_right_size` (paysage, portrait, pivoté, anamorphique, minuscule, impair, ultra-large, UHD).
+
 - Clips sans piste audio (captures d'écran…) : acceptés (`Asset.has_audio`). Pas de silences/transcription/forme d'onde pour eux (erreur explicite qui renvoie vers `edit_edl insert`), piste A1 marquée « no audio », et au rendu un silence est généré (`anullsrc`) pour garder un flux audio par cut dans le `concat`.
 
 - Fichier projet : JSON versionné (`version: 1`), écrit atomiquement, autosauvegardé une fois lié par `save_project`. L'UI et l'agent partagent le même fichier lié ; « Nouveau » le délie (plus aucune écriture vers l'ancien fichier).

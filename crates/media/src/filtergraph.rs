@@ -59,6 +59,7 @@ pub fn build_filter_graph(
         let input = cut.input;
         parts.push(format!(
             "[sv{input}_{slot}]trim=start={s:.6}:end={e:.6},setpts=PTS-STARTPTS,\
+             scale=iw*sar:ih,\
              scale={width}:{height}:force_original_aspect_ratio=decrease,\
              pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},format=yuv420p[v{i}]"
         ));

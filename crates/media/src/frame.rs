@@ -14,7 +14,8 @@ pub async fn extract_frame(
     output: &Path,
     max_width: u32,
 ) -> Result<(), MediaError> {
-    let scale = format!("scale='min({max_width},iw)':-2");
+    // Square the pixels first (anamorphic footage), then shrink; never enlarge.
+    let scale = format!("scale=iw*sar:ih,scale='min({max_width},iw)':-2");
     let mut cmd = command(&binaries.ffmpeg);
     // -ss before -i seeks fast (keyframe jump, then exact decode to the timestamp).
     cmd.args(["-hide_banner", "-nostdin", "-y", "-ss"])

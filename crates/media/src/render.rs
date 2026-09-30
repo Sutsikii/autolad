@@ -12,6 +12,15 @@ use crate::filtergraph::{build_filter_graph, PlacedCut};
 use crate::parse::parse_progress_time;
 use crate::process::{command, spawn_error, tail};
 
+/// What one ffmpeg run needs besides the encoder, so a retry can reuse it as is.
+#[derive(Clone, Copy)]
+struct Job<'a> {
+    inputs: &'a [&'a Path],
+    graph_path: &'a Path,
+    output: &'a Path,
+    total: f64,
+}
+
 /// Renders an EDL with ffmpeg. Cancel by dropping the future: the process is killed.
 #[derive(Debug, Clone)]
 pub struct FfmpegRenderer {
@@ -41,18 +50,35 @@ impl FfmpegRenderer {
         std::fs::write(&graph_path, graph).map_err(|e| spawn_error("ffmpeg", &e))?;
         // A guard rather than a trailing remove: the future is dropped on cancellation.
         let _cleanup = RemoveOnDrop(graph_path.clone());
-        self.run(&inputs, &graph_path, output, edl.total_duration(), progress)
-            .await
+        let job = Job {
+            inputs: &inputs,
+            graph_path: &graph_path,
+            output,
+            total: edl.total_duration(),
+        };
+        let encoder = self.encoder.for_size(options.width, options.height);
+        match self.run(encoder, &job, progress).await {
+            // Hardware encoders can refuse a job for reasons no size rule predicts (driver
+            // limits, busy GPU): software encoding always works, only slower.
+            Err(MediaError::Failed { .. }) if encoder.is_hardware() => {
+                self.run(Encoder::X264, &job, progress).await
+            }
+            result => result,
+        }
     }
 
     async fn run(
         &self,
-        inputs: &[&Path],
-        graph_path: &Path,
-        output: &Path,
-        total: f64,
+        encoder: Encoder,
+        job: &Job<'_>,
         progress: ProgressFn<'_>,
     ) -> Result<(), MediaError> {
+        let Job {
+            inputs,
+            graph_path,
+            output,
+            total,
+        } = *job;
         let mut cmd = command(&self.binaries.ffmpeg);
         cmd.args([
             "-hide_banner",
@@ -68,7 +94,7 @@ impl FfmpegRenderer {
         cmd.arg("-/filter_complex")
             .arg(graph_path)
             .args(["-map", "[outv]", "-map", "[outa]"])
-            .args(self.encoder.args())
+            .args(encoder.args())
             .args(["-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k"])
             .args(["-movflags", "+faststart"])
             .arg(output)
@@ -150,8 +176,8 @@ fn validate(o: &RenderOptions) -> Result<(), MediaError> {
     Ok(())
 }
 
-/// Assigns each distinct asset one `-i` input, in order of first use.
-/// Inputs in order of first use, whether each has audio, and the cuts pointing at them.
+/// Assigns each distinct asset one `-i` input, in order of first use. Returns those inputs,
+/// whether each has audio, and the cuts pointing at them.
 #[allow(clippy::type_complexity)]
 fn place_cuts<'a>(
     assets: &'a [Asset],
