@@ -129,7 +129,7 @@ UPDATE_BINDINGS=1 cargo test -p autolad bindings   # regenerate src/ipc/bindings
 - Le test `bindings_are_up_to_date` échoue si `src/ipc/bindings.ts` est périmé.
 - `core` expose `specta::Type` derrière la feature `specta` (activée par `src-tauri` uniquement).
 - `mcp` expose aussi `specta` (activée par `src-tauri`) : l'UI desktop réutilise `Engine` (import, silences, EDL, preview, rendu) via `src-tauri/src/commands/editor.rs`, donc une seule logique pour l'UI et pour les agents. Les indices/tailles 64 bits sont exportés en `number` (`BigIntExportBehavior::Number`).
-- UI : pas de plugin dialog (dépendance non ajoutée). Import par glisser-déposer (chemins réels via `onDragDropEvent`) ou chemin collé ; l'export écrit `<source>_autolad.mp4` à côté du premier rush. Preview : proxy H.264 540p (GOP 15) + AAC généré par asset dans `<data>/proxies/<id>.mp4`, joué par un `<video>` (son inclus) piloté par la timeline (`preview/useVideoMonitor.ts` ; la vidéo est l'horloge en lecture, saut de source à chaque fin de cut). En attendant le proxy, repli sur un PNG par position du playhead.
+- UI : `tauri-plugin-dialog` (officiel) pour les sélecteurs de fichiers : Importer (Browse…), Nouveau/Ouvrir/Enregistrer/Enregistrer sous (Ctrl+N/O/S, extension `.autolad`, JSON versionné) et destination de l'export ; il embarque `tauri-plugin-fs` en transitif, sans permission accordée. Le glisser-déposer (chemins réels via `onDragDropEvent`) et le chemin collé restent possibles ; sans destination, l'export écrit `<source>_autolad.mp4` à côté du premier rush. Preview : proxy H.264 540p (GOP 15) + AAC généré par asset dans `<data>/proxies/<id>.mp4`, joué par un `<video>` (son inclus) piloté par la timeline (`preview/useVideoMonitor.ts` ; la vidéo est l'horloge en lecture, saut de source à chaque fin de cut). En attendant le proxy, repli sur un PNG par position du playhead.
 - Miniatures (`thumbs/<id>.jpg`, une bande de tuiles 78×44 tirée des keyframes du proxy) et pics audio (`waves/<id>.bin`, 100 octets/s, transmis en base64 par l'IPC) sont dessinés dans le canvas de la timeline. Tout est caché par id d'asset (hash) ; fichiers écrits en `.part` puis renommés.
 - Protocole `asset://` : feature Cargo `protocol-asset` de `tauri` + scope `$APPLOCALDATA/{proxies,thumbs,waves}/**` dans `tauri.conf.json`. Le scope suit le dossier de données : `AUTOLAD_HOME` le contourne, ne pas l'utiliser pour lancer l'UI.
 - Test e2e de l'UI sans écran : lancer l'exe avec `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` et piloter la webview en CDP (invoke des commandes, `Page.captureScreenshot`). Ne pas taper dans la fenêtre pendant le test : les raccourcis (Suppr, S…) modifient l'EDL.
@@ -166,6 +166,6 @@ UPDATE_BINDINGS=1 cargo test -p autolad bindings   # regenerate src/ipc/bindings
 
 ## Décisions prises
 
-- Fichier projet : JSON versionné (`version: 1`), écrit atomiquement, autosauvegardé une fois lié par `save_project`.
+- Fichier projet : JSON versionné (`version: 1`), écrit atomiquement, autosauvegardé une fois lié par `save_project`. L'UI et l'agent partagent le même fichier lié ; « Nouveau » le délie (plus aucune écriture vers l'ancien fichier).
 - Modèle Whisper par défaut : `small` q5_1. Backend GPU : Vulkan.
 - ffmpeg : build GPL statique BtbN en sidecar.

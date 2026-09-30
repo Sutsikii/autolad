@@ -4,8 +4,8 @@ use autolad_core::edl::SilenceSettings;
 use autolad_core::edl_edit::EdlOp;
 use autolad_mcp::base64;
 use autolad_mcp::engine::{
-    AssetSummary, BuildEdlRequest, EdlSummary, FrameTarget, ProjectStatus, RenderRequest,
-    ThumbnailStrip,
+    AssetSummary, BuildEdlRequest, EdlSummary, FrameTarget, OpenReport, ProjectStatus,
+    RenderRequest, ThumbnailStrip,
 };
 use autolad_mcp::jobs::JobStatus;
 use serde::Serialize;
@@ -115,10 +115,37 @@ pub async fn prepare_waveform(
     })
 }
 
-/// Renders next to the first source, so the UI needs no save dialog.
+/// Writes the project to `path` and keeps that file up to date from now on.
 #[tauri::command]
 #[specta::specta]
-pub async fn render_start(state: State<'_, AppState>, draft: bool) -> Result<String, AppError> {
+pub async fn save_project(state: State<'_, AppState>, path: PathBuf) -> Result<PathBuf, AppError> {
+    Ok(state.engine()?.save_project(&path).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn open_project(
+    state: State<'_, AppState>,
+    path: PathBuf,
+) -> Result<OpenReport, AppError> {
+    Ok(state.engine()?.open_project(&path).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn new_project(state: State<'_, AppState>) -> Result<(), AppError> {
+    state.engine()?.new_project();
+    Ok(())
+}
+
+/// Renders to `output`, or next to the first source when none is given.
+#[tauri::command]
+#[specta::specta]
+pub async fn render_start(
+    state: State<'_, AppState>,
+    draft: bool,
+    output: Option<PathBuf>,
+) -> Result<String, AppError> {
     let engine = state.engine()?;
     let status = engine.project_status();
     let first_cut = status
@@ -132,7 +159,7 @@ pub async fn render_start(state: State<'_, AppState>, draft: bool) -> Result<Str
         .find(|asset| asset.id == first_cut.asset)
         .ok_or_else(|| AppError::InvalidInput("the first clip's source is missing".into()))?;
     let request = RenderRequest {
-        output: default_output(&source.path, draft),
+        output: output.unwrap_or_else(|| default_output(&source.path, draft)),
         draft,
         width: None,
         height: None,

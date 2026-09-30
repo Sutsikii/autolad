@@ -5,6 +5,7 @@ import { usePing } from "@/features/automation/usePing";
 import { ExportControls } from "@/features/export/ExportControls";
 import { LibraryPanel } from "@/features/library/LibraryPanel";
 import { useLibraryStore } from "@/features/library/store";
+import { ProjectMenu } from "@/features/project/ProjectMenu";
 import { PreviewPanel } from "@/features/preview/PreviewPanel";
 import { TimelinePanel } from "@/features/timeline/TimelinePanel";
 import { useNotice } from "@/shared/notify";
@@ -15,12 +16,7 @@ import { useShortcuts } from "./useShortcuts";
 function TopBar() {
   return (
     <header className="flex h-11 shrink-0 items-center justify-between border-b border-black bg-[#1a1a1a] px-4">
-      <div className="flex items-baseline gap-2">
-        <span className="text-sm font-semibold tracking-wide text-neutral-100">AutoLad</span>
-        <span data-agent="project-title" className="text-xs text-neutral-500">
-          Untitled sequence
-        </span>
-      </div>
+      <ProjectMenu />
       <ExportControls />
     </header>
   );

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { chooseExportPath } from "@/features/project/actions";
 import { useTimelineStore } from "@/features/timeline/store";
+import { messageOf, notify } from "@/shared/notify";
 import { btn, btnPrimary } from "@/shared/ui/styles";
 import { useExportStore } from "./store";
 
@@ -15,6 +17,15 @@ export function ExportControls() {
   const hasClips = useTimelineStore((s) => s.cuts.length > 0);
 
   const running = job?.state === "running";
+
+  const begin = async () => {
+    try {
+      const output = await chooseExportPath(draft);
+      if (output) await start(draft, output);
+    } catch (error) {
+      notify.error(messageOf(error));
+    }
+  };
   useEffect(() => {
     if (!running) return;
     const timer = setInterval(() => void refresh(), POLL_MS);
@@ -52,7 +63,7 @@ export function ExportControls() {
         data-agent="export"
         className={btnPrimary}
         disabled={!hasClips || running || starting}
-        onClick={() => void start(draft)}
+        onClick={() => void begin()}
       >
         Export
       </button>

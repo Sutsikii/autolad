@@ -60,6 +60,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::editor::prepare_proxy,
             commands::editor::prepare_thumbnails,
             commands::editor::prepare_waveform,
+            commands::editor::save_project,
+            commands::editor::open_project,
+            commands::editor::new_project,
             commands::editor::render_start,
             commands::editor::render_status,
             commands::editor::render_cancel,
@@ -77,6 +80,7 @@ pub fn run() {
         .expect("failed to export TypeScript bindings");
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);

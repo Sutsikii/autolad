@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { pickVideos } from "@/features/project/actions";
 import { addAssetToTimeline } from "@/features/timeline/actions";
 import type { AssetSummary } from "@/ipc";
 import { cn } from "@/shared/lib/utils";
@@ -45,6 +46,13 @@ export function LibraryPanel() {
         />
         <button className={btn} disabled={!pathInput.trim()} onClick={submit}>
           Import
+        </button>
+        <button
+          className={btn}
+          onClick={() => void pickVideos(importPath)}
+          title="Choose video files"
+        >
+          Browse…
         </button>
       </div>
 

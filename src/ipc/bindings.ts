@@ -93,11 +93,38 @@ async prepareWaveform(assetId: string) : Promise<Result<WaveformPeaks, AppError>
 }
 },
 /**
- * Renders next to the first source, so the UI needs no save dialog.
+ * Writes the project to `path` and keeps that file up to date from now on.
  */
-async renderStart(draft: boolean) : Promise<Result<string, AppError>> {
+async saveProject(path: string) : Promise<Result<string, AppError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("render_start", { draft }) };
+    return { status: "ok", data: await TAURI_INVOKE("save_project", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async openProject(path: string) : Promise<Result<OpenReport, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_project", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async newProject() : Promise<Result<null, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("new_project") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Renders to `output`, or next to the first source when none is given.
+ */
+async renderStart(draft: boolean, output: string | null) : Promise<Result<string, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("render_start", { draft, output }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -204,6 +231,11 @@ export type JobStatus = ({ state: "running" } | { state: "done"; size_bytes: num
  * Fraction in `[0, 1]`.
  */
 progress: number; elapsed_secs: number }
+export type OpenReport = { assets: number; cuts: number; 
+/**
+ * Source files that no longer exist at their recorded path.
+ */
+missing_files: string[] }
 export type ProjectStatus = { assets: AssetSummary[]; edl: EdlSummary; project_file: string | null }
 /**
  * User-facing silence-removal settings, in seconds.

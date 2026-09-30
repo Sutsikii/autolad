@@ -9,6 +9,7 @@ interface LibraryState {
   selectedId: string | null;
   importing: number;
   setAssets: (assets: AssetSummary[]) => void;
+  reset: () => void;
   select: (id: string | null) => void;
   importPath: (path: string) => Promise<void>;
 }
@@ -18,7 +19,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   selectedId: null,
   importing: 0,
   setAssets: (assets) =>
-    set((s) => ({ assets, selectedId: s.selectedId ?? assets[0]?.id ?? null })),
+    set((s) => ({
+      assets,
+      selectedId: assets.some((a) => a.id === s.selectedId) ? s.selectedId : (assets[0]?.id ?? null),
+    })),
+  reset: () => set({ assets: [], selectedId: null }),
   select: (id) => set({ selectedId: id }),
   importPath: async (raw) => {
     const path = cleanPath(raw);

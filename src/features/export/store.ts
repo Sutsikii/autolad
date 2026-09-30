@@ -6,7 +6,7 @@ import { messageOf, notify } from "@/shared/notify";
 interface ExportState {
   job: JobStatus | null;
   starting: boolean;
-  start: (draft: boolean) => Promise<void>;
+  start: (draft: boolean, output: string | null) => Promise<void>;
   refresh: () => Promise<void>;
   cancel: () => Promise<void>;
 }
@@ -16,10 +16,10 @@ const MEGABYTE = 1024 * 1024;
 export const useExportStore = create<ExportState>((set, get) => ({
   job: null,
   starting: false,
-  start: async (draft) => {
+  start: async (draft, output) => {
     set({ starting: true });
     try {
-      const id = await call(api.renderStart(draft));
+      const id = await call(api.renderStart(draft, output));
       set({ job: await call(api.renderStatus(id)) });
     } catch (error) {
       notify.error(messageOf(error));

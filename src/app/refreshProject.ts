@@ -1,5 +1,6 @@
 import { useMediaStore } from "@/features/library/mediaStore";
 import { useLibraryStore } from "@/features/library/store";
+import { useProjectStore } from "@/features/project/store";
 import { useTimelineStore } from "@/features/timeline/store";
 import { api, call } from "@/ipc";
 import { messageOf, notify } from "@/shared/notify";
@@ -11,6 +12,7 @@ export async function refreshProject(): Promise<void> {
     useLibraryStore.getState().setAssets(status.assets);
     for (const asset of status.assets) void useMediaStore.getState().prepare(asset.id);
     useTimelineStore.getState().setEdl(status.edl);
+    useProjectStore.getState().setFile(status.project_file);
   } catch (error) {
     notify.error(messageOf(error));
   }

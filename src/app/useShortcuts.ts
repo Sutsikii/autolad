@@ -1,5 +1,11 @@
 import { useEffect } from "react";
 import { usePreviewStore } from "@/features/preview/store";
+import {
+  newProject,
+  openProject,
+  saveProject,
+  saveProjectAs,
+} from "@/features/project/actions";
 import { deleteSelected, moveSelected, splitAtPlayhead } from "@/features/timeline/actions";
 import { nextCutStart, previousCutStart } from "@/features/timeline/layout";
 import { useTimelineStore } from "@/features/timeline/store";
@@ -57,10 +63,31 @@ function handleKey(event: KeyboardEvent): boolean {
   }
 }
 
+/** File shortcuts (Ctrl+N/O/S). */
+function handleFileKey(event: KeyboardEvent): boolean {
+  switch (event.code) {
+    case "KeyN":
+      void newProject();
+      return true;
+    case "KeyO":
+      void openProject();
+      return true;
+    case "KeyS":
+      void (event.shiftKey ? saveProjectAs() : saveProject());
+      return true;
+    default:
+      return false;
+  }
+}
+
 export function useShortcuts(): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (isTyping(event.target) || event.ctrlKey || event.metaKey) return;
+      if (event.ctrlKey || event.metaKey) {
+        if (handleFileKey(event)) event.preventDefault();
+        return;
+      }
+      if (isTyping(event.target)) return;
       if (handleKey(event)) event.preventDefault();
     };
     window.addEventListener("keydown", onKeyDown);

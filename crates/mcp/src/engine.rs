@@ -159,6 +159,7 @@ pub struct TranscriptReport {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct OpenReport {
     pub assets: usize,
     pub cuts: usize,
@@ -627,6 +628,11 @@ impl Engine {
         lock(&self.state).project_path = Some(path.clone());
         self.persist().await?;
         Ok(path)
+    }
+
+    /// Starts an empty project, not bound to any file.
+    pub fn new_project(&self) {
+        *lock(&self.state) = State::default();
     }
 
     pub async fn open_project(&self, path: &Path) -> Result<OpenReport, EngineError> {

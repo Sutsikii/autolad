@@ -242,6 +242,30 @@ async fn project_survives_save_and_reopen() {
 }
 
 #[tokio::test]
+async fn a_new_project_is_empty_and_no_longer_writes_to_the_old_file() {
+    let dir = scratch("new-project");
+    let clip = dir.join("talk.mp4");
+    make_clip(&clip, 3, "320x240");
+    let project = dir.join("project.json");
+
+    let engine = engine(&dir);
+    engine.import_media(&clip).await.unwrap();
+    engine.save_project(&project).await.unwrap();
+    let saved = std::fs::read_to_string(&project).unwrap();
+
+    engine.new_project();
+    let status = engine.project_status();
+    assert!(status.assets.is_empty());
+    assert!(status.edl.cuts.is_empty());
+    assert!(status.project_file.is_none());
+
+    // Work in the new project must not leak into the file of the previous one.
+    engine.import_media(&clip).await.unwrap();
+    engine.edit_edl(vec![EdlOp::Clear]).await.unwrap();
+    assert_eq!(std::fs::read_to_string(&project).unwrap(), saved);
+}
+
+#[tokio::test]
 async fn draft_render_produces_a_playable_smaller_video() {
     let dir = scratch("render");
     let clip = dir.join("talk.mp4");
