@@ -1,4 +1,5 @@
 use autolad_core::CoreError;
+use autolad_mcp::EngineError;
 use serde::Serialize;
 use specta::Type;
 use thiserror::Error;
@@ -27,9 +28,31 @@ impl From<CoreError> for AppError {
     }
 }
 
+impl From<EngineError> for AppError {
+    fn from(e: EngineError) -> Self {
+        match e {
+            EngineError::Core(core) => core.into(),
+            EngineError::Invalid(_) | EngineError::UnknownAsset(_) | EngineError::UnknownJob(_) => {
+                Self::InvalidInput(e.to_string())
+            }
+            EngineError::Media(_) | EngineError::Transcribe(_) | EngineError::Io(_) => {
+                Self::Internal(e.to_string())
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn engine_validation_errors_map_to_invalid_input() {
+        let e: AppError = EngineError::Invalid("bad".into()).into();
+        assert!(matches!(e, AppError::InvalidInput(_)));
+        let e: AppError = EngineError::Io("disk".into()).into();
+        assert!(matches!(e, AppError::Internal(_)));
+    }
 
     #[test]
     fn core_validation_errors_map_to_invalid_input() {

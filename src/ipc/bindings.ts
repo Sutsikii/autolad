@@ -18,6 +18,79 @@ async buildSilenceEdl(asset: Asset, silences: TimeRange[], settings: SilenceSett
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async importMedia(path: string) : Promise<Result<AssetSummary, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("import_media", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async projectStatus() : Promise<Result<ProjectStatus, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("project_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Replaces the EDL with the speech parts of `asset_id`.
+ */
+async autoCut(assetId: string, settings: SilenceSettings, noiseDb: number | null) : Promise<Result<EdlSummary, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("auto_cut", { assetId, settings, noiseDb }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async editEdl(ops: EdlOp[]) : Promise<Result<EdlSummary, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("edit_edl", { ops }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Frame of the edit at `time`, as a PNG data URL ready for an `<img>`.
+ */
+async previewFrame(time: number, maxWidth: number) : Promise<Result<string, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("preview_frame", { time, maxWidth }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Renders next to the first source, so the UI needs no save dialog.
+ */
+async renderStart(draft: boolean) : Promise<Result<string, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("render_start", { draft }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async renderStatus(jobId: string) : Promise<Result<JobStatus, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("render_status", { jobId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async renderCancel(jobId: string) : Promise<Result<JobStatus, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("render_cancel", { jobId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -41,14 +114,56 @@ export type Asset = { id: AssetId; path: string; duration: number }
  * Stable identifier of an imported asset (content hash, see cache rules in CLAUDE.md).
  */
 export type AssetId = string
+export type AssetSummary = { id: string; path: string; duration: number; width: number | null; height: number | null; fps: number | null }
 /**
  * One kept portion of a source asset.
  */
 export type Cut = { asset: AssetId; range: TimeRange }
+export type CutSummary = { index: number; asset: string; start: number; end: number; duration: number; 
+/**
+ * Where this cut begins on the edited timeline.
+ */
+timeline_start: number }
 /**
  * Edit decision list: the ordered cuts that make up the final video.
  */
 export type Edl = { cuts: Cut[] }
+/**
+ * One edit. Indices refer to the EDL as it is when the op runs, so a batch is
+ * applied in order.
+ */
+export type EdlOp = 
+/**
+ * Removes the cut at `index`.
+ */
+{ op: "delete"; index: number } | 
+/**
+ * Changes the source range of a cut (absolute source seconds).
+ */
+{ op: "trim"; index: number; start: number; end: number } | 
+/**
+ * Splits a cut in two at source time `at`, which must fall strictly inside it.
+ */
+{ op: "split"; index: number; at: number } | 
+/**
+ * Moves the cut at `from` so that it ends up at position `to`.
+ */
+{ op: "move"; from: number; to: number } | 
+/**
+ * Inserts a new cut before position `index` (`index == len` appends).
+ */
+{ op: "insert"; index: number; asset: AssetId; start: number; end: number } | 
+/**
+ * Removes every cut.
+ */
+{ op: "clear" }
+export type EdlSummary = { cuts: CutSummary[]; total_duration: number }
+export type JobStatus = ({ state: "running" } | { state: "done"; size_bytes: number } | { state: "failed"; error: string } | { state: "cancelled" }) & { id: string; output: string; 
+/**
+ * Fraction in `[0, 1]`.
+ */
+progress: number; elapsed_secs: number }
+export type ProjectStatus = { assets: AssetSummary[]; edl: EdlSummary; project_file: string | null }
 /**
  * User-facing silence-removal settings, in seconds.
  */

@@ -9,6 +9,7 @@ use tauri_specta::{collect_commands, Builder};
 
 use state::AppState;
 
+#[cfg(any(debug_assertions, test))]
 const BINDINGS_PATH: &str = "../src/ipc/bindings.ts";
 
 /// MCP mode: no window, protocol on stdout, diagnostics on stderr only.
@@ -38,14 +39,26 @@ pub fn run_mcp() -> std::process::ExitCode {
 }
 
 // The generated file has unused helpers (events, channels) that strict tsc rejects.
+// Sizes and indices stay far below 2^53, so `number` is safe for 64-bit integers.
+#[cfg(any(debug_assertions, test))]
 fn ts_exporter() -> specta_typescript::Typescript {
-    specta_typescript::Typescript::default().header("// @ts-nocheck")
+    specta_typescript::Typescript::default()
+        .header("// @ts-nocheck")
+        .bigint(specta_typescript::BigIntExportBehavior::Number)
 }
 
 fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new().commands(collect_commands![
         commands::system::ping,
         commands::automation::build_silence_edl,
+        commands::editor::import_media,
+        commands::editor::project_status,
+        commands::editor::auto_cut,
+        commands::editor::edit_edl,
+        commands::editor::preview_frame,
+        commands::editor::render_start,
+        commands::editor::render_status,
+        commands::editor::render_cancel,
     ])
 }
 
