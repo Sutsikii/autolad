@@ -1,0 +1,8 @@
+[build]
+# whisper.cpp + Vulkan nest CMake dirs deep enough to exceed Windows' 260-char path limit
+# (MSBuild's FileTracker ignores long-path support), so build artifacts live in a short path.
+target-dir = "C:/t"
+
+[env]
+# bindgen (whisper-rs-sys) needs libclang; the LLVM installer does not set this.
+LIBCLANG_PATH = "C:/Program Files/LLVM/bin"
