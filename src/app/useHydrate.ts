@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useMediaStore } from "@/features/library/mediaStore";
 import { useLibraryStore } from "@/features/library/store";
 import { useTimelineStore } from "@/features/timeline/store";
 import { api, call } from "@/ipc";
@@ -10,6 +11,7 @@ export function useHydrate(): void {
     call(api.projectStatus()).then(
       (status) => {
         useLibraryStore.getState().setAssets(status.assets);
+        for (const asset of status.assets) void useMediaStore.getState().prepare(asset.id);
         useTimelineStore.getState().setEdl(status.edl);
       },
       (error: unknown) => notify.error(messageOf(error)),

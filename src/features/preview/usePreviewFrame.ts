@@ -12,12 +12,13 @@ interface Wanted {
 
 /**
  * Keeps the monitor on the frame under the playhead. One request at a time: while
- * scrubbing or playing, intermediate positions are skipped and only the latest is fetched.
+ * scrubbing, intermediate positions are skipped and only the latest is fetched.
+ * Only a fallback: once the proxy is ready the <video> shows the frame, so `enabled` is false.
  */
-export function usePreviewFrame(): { src: string | null; error: string | null } {
+export function usePreviewFrame(enabled: boolean): { src: string | null; error: string | null } {
   const playhead = useTimelineStore((s) => s.playhead);
   const version = useTimelineStore((s) => s.version);
-  const hasClips = useTimelineStore((s) => s.cuts.length > 0);
+  const hasClips = useTimelineStore((s) => s.cuts.length > 0) && enabled;
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 

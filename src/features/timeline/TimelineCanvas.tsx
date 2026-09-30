@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useMediaStore } from "@/features/library/mediaStore";
 import { drawTimeline } from "./draw";
 import { clamp, cutIndexAt, maxScroll, RULER_H, xToTime } from "./layout";
 import { useTimelineStore } from "./store";
@@ -20,6 +21,7 @@ export function TimelineCanvas({ fitRequest }: Props) {
   const playhead = useTimelineStore((s) => s.playhead);
   const selected = useTimelineStore((s) => s.selected);
   const pxPerSec = useTimelineStore((s) => s.pxPerSec);
+  const media = useMediaStore((s) => s.byAsset);
   const seek = useTimelineStore((s) => s.seek);
   const select = useTimelineStore((s) => s.select);
   const setZoom = useTimelineStore((s) => s.setZoom);
@@ -69,8 +71,9 @@ export function TimelineCanvas({ fitRequest }: Props) {
       scrollX,
       playhead,
       selected,
+      media,
     });
-  }, [size, cuts, duration, pxPerSec, scrollX, playhead, selected]);
+  }, [size, cuts, duration, pxPerSec, scrollX, playhead, selected, media]);
 
   // Native listener: React's wheel handler is passive and cannot stop the webview's own zoom.
   const onWheel = useCallback(

@@ -22,6 +22,9 @@ function handleKey(event: KeyboardEvent): boolean {
     case "Space":
       usePreviewStore.getState().toggle();
       return true;
+    case "KeyM":
+      usePreviewStore.getState().toggleMute();
+      return true;
     case "KeyS":
       void splitAtPlayhead();
       return true;

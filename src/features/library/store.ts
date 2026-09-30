@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { api, call, type AssetSummary } from "@/ipc";
 import { cleanPath, fileName } from "@/shared/lib/path";
+import { useMediaStore } from "./mediaStore";
 import { messageOf, notify } from "@/shared/notify";
 
 interface LibraryState {
@@ -27,6 +28,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const asset = await call(api.importMedia(path));
       const known = get().assets.some((a) => a.id === asset.id);
       set((s) => ({ assets: known ? s.assets : [...s.assets, asset], selectedId: asset.id }));
+      void useMediaStore.getState().prepare(asset.id);
       notify.info(known ? `${fileName(path)} is already imported` : `Imported ${fileName(path)}`);
     } catch (error) {
       notify.error(messageOf(error));
