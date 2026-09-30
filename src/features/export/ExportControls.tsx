@@ -14,6 +14,8 @@ export function ExportControls() {
   const start = useExportStore((s) => s.start);
   const refresh = useExportStore((s) => s.refresh);
   const cancel = useExportStore((s) => s.cancel);
+  const normalize = useExportStore((s) => s.normalize);
+  const setNormalize = useExportStore((s) => s.setNormalize);
   const hasClips = useTimelineStore((s) => s.cuts.length > 0);
 
   const running = job?.state === "running";
@@ -58,6 +60,18 @@ export function ExportControls() {
           className="accent-sky-500"
         />
         Draft
+      </label>
+      <label
+        className="flex items-center gap-1.5 text-xs text-neutral-400"
+        title="Level the sound to -14 LUFS, the loudness YouTube and Spotify play at"
+      >
+        <input
+          type="checkbox"
+          checked={normalize}
+          onChange={(e) => setNormalize(e.target.checked)}
+          className="accent-sky-500"
+        />
+        Loudness
       </label>
       <button
         data-agent="export"

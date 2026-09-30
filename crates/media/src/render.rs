@@ -173,6 +173,12 @@ fn validate(o: &RenderOptions) -> Result<(), MediaError> {
     if !o.fps.is_finite() || o.fps <= 0.0 || o.fps > 240.0 {
         return Err(MediaError::InvalidOptions("fps must be in (0, 240]"));
     }
+    // loudnorm's accepted range for the integrated target.
+    if o.loudness.is_some_and(|l| !(-70.0..=-5.0).contains(&l)) {
+        return Err(MediaError::InvalidOptions(
+            "loudness target must be in [-70, -5] LUFS",
+        ));
+    }
     Ok(())
 }
 
@@ -264,8 +270,14 @@ mod tests {
             width: 1280,
             height: 720,
             fps: 30.0,
+            loudness: Some(-14.0),
         };
         assert!(validate(&ok).is_ok());
+        assert!(validate(&RenderOptions {
+            loudness: Some(0.0),
+            ..ok
+        })
+        .is_err());
         assert!(validate(&RenderOptions { width: 1281, ..ok }).is_err());
         assert!(validate(&RenderOptions { fps: 0.0, ..ok }).is_err());
         assert!(validate(&RenderOptions {

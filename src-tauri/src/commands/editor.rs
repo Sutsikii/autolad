@@ -180,13 +180,18 @@ pub fn new_project(state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Renders to `output`, or next to the first source when none is given.
+/// Streaming platforms normalize to about -14 LUFS.
+const TARGET_LUFS: f64 = -14.0;
+
+/// Renders to `output`, or next to the first source when none is given. Every cut gets short
+/// audio fades; `normalize_audio` also levels the loudness to -14 LUFS.
 #[tauri::command]
 #[specta::specta]
 pub async fn render_start(
     state: State<'_, AppState>,
     draft: bool,
     output: Option<PathBuf>,
+    normalize_audio: bool,
 ) -> Result<String, AppError> {
     let engine = state.engine()?;
     let status = engine.project_status();
@@ -207,6 +212,7 @@ pub async fn render_start(
         height: None,
         fps: None,
         overwrite: true,
+        loudness: normalize_audio.then_some(TARGET_LUFS),
     };
     Ok(engine.render_start(request).await?)
 }

@@ -27,6 +27,9 @@ pub struct RenderOptions {
     pub width: u32,
     pub height: u32,
     pub fps: f64,
+    /// Integrated loudness the audio is normalized to, in LUFS (EBU R128). `None` keeps the
+    /// levels as recorded.
+    pub loudness: Option<f64>,
 }
 
 /// Receives render progress as a fraction in `[0, 1]`.

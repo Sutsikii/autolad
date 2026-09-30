@@ -6,6 +6,9 @@ import { messageOf, notify } from "@/shared/notify";
 interface ExportState {
   job: JobStatus | null;
   starting: boolean;
+  /** Level the loudness to -14 LUFS, like streaming platforms do. */
+  normalize: boolean;
+  setNormalize: (normalize: boolean) => void;
   start: (draft: boolean, output: string | null) => Promise<void>;
   refresh: () => Promise<void>;
   cancel: () => Promise<void>;
@@ -16,10 +19,12 @@ const MEGABYTE = 1024 * 1024;
 export const useExportStore = create<ExportState>((set, get) => ({
   job: null,
   starting: false,
+  normalize: true,
+  setNormalize: (normalize) => set({ normalize }),
   start: async (draft, output) => {
     set({ starting: true });
     try {
-      const id = await call(api.renderStart(draft, output));
+      const id = await call(api.renderStart(draft, output, get().normalize));
       set({ job: await call(api.renderStatus(id)) });
     } catch (error) {
       notify.error(messageOf(error));

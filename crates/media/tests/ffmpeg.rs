@@ -85,6 +85,7 @@ const OPTS: RenderOptions = RenderOptions {
     width: 320,
     height: 240,
     fps: 25.0,
+    loudness: Some(-14.0),
 };
 
 #[tokio::test]
@@ -202,6 +203,68 @@ async fn detected_encoder_can_render() {
         .await
         .unwrap_or_else(|e| panic!("render with {encoder:?} failed: {e}"));
     assert!(std::fs::metadata(&out).unwrap().len() > 0);
+}
+
+/// Integrated loudness of a file in LUFS, as ffmpeg's EBU R128 meter reports it.
+fn integrated_loudness(b: &Binaries, path: &Path) -> f64 {
+    let output = Command::new(&b.ffmpeg)
+        .args(["-hide_banner", "-nostats", "-i"])
+        .arg(path)
+        .args(["-af", "ebur128", "-f", "null", "-"])
+        .output()
+        .unwrap();
+    let log = String::from_utf8_lossy(&output.stderr);
+    // The summary comes last: "Integrated loudness:\n    I:         -23.0 LUFS".
+    let summary = log.rsplit("Integrated loudness:").next().unwrap();
+    let value = summary
+        .split("I:")
+        .nth(1)
+        .unwrap()
+        .split("LUFS")
+        .next()
+        .unwrap();
+    value.trim().parse().unwrap()
+}
+
+#[tokio::test]
+async fn renders_are_normalized_to_the_loudness_target() {
+    let b = binaries();
+    let dir = scratch("loudness");
+    let clip = dir.join("clip.mp4");
+    make_clip(&b, &clip, "320x240");
+    // The two parts with sound: a jump cut in the middle, faded on both sides.
+    let edl = Edl {
+        cuts: vec![cut("a", 0.0, 1.0), cut("a", 2.0, 3.0)],
+    };
+    let render = |loudness: Option<f64>, name: &str| {
+        let out = dir.join(name);
+        let options = RenderOptions { loudness, ..OPTS };
+        let renderer = FfmpegRenderer::new(b.clone(), Encoder::X264);
+        let assets = [asset("a", &clip)];
+        let edl = edl.clone();
+        async move {
+            renderer
+                .render_edl(&assets, &edl, &options, &out, &|_| {})
+                .await
+                .unwrap();
+            out
+        }
+    };
+
+    let quiet = render(Some(-30.0), "quiet.mp4").await;
+    let loud = render(Some(-16.0), "loud.mp4").await;
+    let (quiet, loud) = (
+        integrated_loudness(&b, &quiet),
+        integrated_loudness(&b, &loud),
+    );
+    assert!(
+        (quiet + 30.0).abs() < 2.0,
+        "quiet render measured {quiet} LUFS"
+    );
+    assert!(
+        (loud + 16.0).abs() < 2.0,
+        "loud render measured {loud} LUFS"
+    );
 }
 
 #[tokio::test]

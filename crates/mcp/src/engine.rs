@@ -236,6 +236,8 @@ pub struct RenderRequest {
     pub height: Option<u32>,
     pub fps: Option<f64>,
     pub overwrite: bool,
+    /// Loudness target in LUFS; `None` keeps the recorded levels.
+    pub loudness: Option<f64>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -975,6 +977,7 @@ fn resolve_options(first: &AssetEntry, req: &RenderRequest) -> Result<RenderOpti
         width: even(width),
         height: even(height),
         fps,
+        loudness: req.loudness,
     };
     if !options.fps.is_finite() || options.fps <= 0.0 || options.fps > 240.0 {
         return Err(EngineError::Invalid("fps must be in (0, 240]".into()));
@@ -1010,6 +1013,7 @@ mod tests {
             height: None,
             fps: None,
             overwrite: false,
+            loudness: None,
         }
     }
 

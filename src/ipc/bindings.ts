@@ -162,11 +162,12 @@ async newProject() : Promise<Result<null, AppError>> {
 }
 },
 /**
- * Renders to `output`, or next to the first source when none is given.
+ * Renders to `output`, or next to the first source when none is given. Every cut gets short
+ * audio fades; `normalize_audio` also levels the loudness to -14 LUFS.
  */
-async renderStart(draft: boolean, output: string | null) : Promise<Result<string, AppError>> {
+async renderStart(draft: boolean, output: string | null, normalizeAudio: boolean) : Promise<Result<string, AppError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("render_start", { draft, output }) };
+    return { status: "ok", data: await TAURI_INVOKE("render_start", { draft, output, normalizeAudio }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

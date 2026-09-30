@@ -6,6 +6,17 @@ use autolad_core::TimeRange;
 
 use crate::error::MediaError;
 
+/// Length of the fades at each audio cut. A cut in the middle of a waveform clicks; 10 ms of
+/// fade removes the click without being heard as a fade.
+pub const CUT_FADE: f64 = 0.01;
+
+/// Loudness range and true-peak ceiling used with the loudness target (streaming defaults).
+const LOUDNESS_RANGE: f64 = 11.0;
+const TRUE_PEAK_DB: f64 = -1.5;
+
+/// Two cuts closer than this in the same source play as one continuous take.
+const CONTIGUOUS: f64 = 0.001;
+
 /// A cut resolved to the index of its `-i` input.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PlacedCut {
@@ -21,6 +32,9 @@ pub struct PlacedCut {
 ///
 /// `audio_inputs[i]` tells whether input `i` has an audio track. A silent input contributes
 /// generated silence of the cut's length, so the concat still gets one audio stream per cut.
+///
+/// Audio fades in and out at every join where the sound jumps (not between two cuts that
+/// continue the same take), and the mix is normalized when `opts.loudness` is set.
 pub fn build_filter_graph(
     cuts: &[PlacedCut],
     audio_inputs: &[bool],
@@ -53,7 +67,12 @@ pub fn build_filter_graph(
         }
     }
 
-    let RenderOptions { width, height, fps } = *opts;
+    let RenderOptions {
+        width,
+        height,
+        fps,
+        loudness,
+    } = *opts;
     for (i, (cut, slot)) in cuts.iter().zip(&slots).enumerate() {
         let (s, e) = (cut.range.start, cut.range.end);
         let input = cut.input;
@@ -64,9 +83,10 @@ pub fn build_filter_graph(
              pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},format=yuv420p[v{i}]"
         ));
         if has_audio(input) {
+            let fades = fades(cuts, i);
             parts.push(format!(
                 "[sa{input}_{slot}]atrim=start={s:.6}:end={e:.6},asetpts=PTS-STARTPTS,\
-                 aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a{i}]"
+                 aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo{fades}[a{i}]"
             ));
         } else {
             let length = e - s;
@@ -78,8 +98,38 @@ pub fn build_filter_graph(
     }
 
     let pads: String = (0..cuts.len()).map(|i| format!("[v{i}][a{i}]")).collect();
-    parts.push(format!("{pads}concat=n={}:v=1:a=1[outv][outa]", cuts.len()));
+    let n = cuts.len();
+    match loudness {
+        None => parts.push(format!("{pads}concat=n={n}:v=1:a=1[outv][outa]")),
+        Some(target) => {
+            parts.push(format!("{pads}concat=n={n}:v=1:a=1[outv][mix]"));
+            // loudnorm works at 192 kHz internally: bring it back to the output rate.
+            parts.push(format!(
+                "[mix]loudnorm=I={target}:TP={TRUE_PEAK_DB}:LRA={LOUDNESS_RANGE},\
+                 aresample=48000[outa]"
+            ));
+        }
+    }
     Ok(parts.join(";\n"))
+}
+
+/// `afade` filters for cut `i`: in unless it continues the previous cut, out unless the next
+/// cut continues it. Short cuts get shorter fades so the two never overlap.
+fn fades(cuts: &[PlacedCut], i: usize) -> String {
+    let cut = cuts[i];
+    let continues = |a: &PlacedCut, b: &PlacedCut| {
+        a.input == b.input && (a.range.end - b.range.start).abs() < CONTIGUOUS
+    };
+    let fade = CUT_FADE.min(cut.range.duration() / 2.0);
+    let mut out = String::new();
+    if i == 0 || !continues(&cuts[i - 1], &cut) {
+        out.push_str(&format!(",afade=t=in:st=0:d={fade:.6}"));
+    }
+    if cuts.get(i + 1).is_none_or(|next| !continues(&cut, next)) {
+        let start = cut.range.duration() - fade;
+        out.push_str(&format!(",afade=t=out:st={start:.6}:d={fade:.6}"));
+    }
+    out
 }
 
 #[cfg(test)]
@@ -97,7 +147,51 @@ mod tests {
         width: 1280,
         height: 720,
         fps: 30.0,
+        loudness: None,
     };
+
+    /// The filter chain that produces pad `[a{i}]`.
+    fn audio_chain(graph: &str, i: usize) -> String {
+        let pad = format!("[a{i}]");
+        graph
+            .split(";\n")
+            .find(|part| part.ends_with(&pad))
+            .unwrap()
+            .to_owned()
+    }
+
+    #[test]
+    fn audio_fades_at_jumps_but_not_inside_a_continuous_take() {
+        // Cuts 0 and 1 continue each other (a split); cut 2 jumps elsewhere in the source.
+        let cuts = [cut(0, 0.0, 2.0), cut(0, 2.0, 3.0), cut(0, 5.0, 6.0)];
+        let g = build_filter_graph(&cuts, &[true], &OPTS).unwrap();
+        assert!(audio_chain(&g, 0).contains("afade=t=in:st=0:d=0.010000"));
+        assert!(!audio_chain(&g, 0).contains("afade=t=out"));
+        assert!(!audio_chain(&g, 1).contains("afade=t=in"));
+        assert!(audio_chain(&g, 1).contains("afade=t=out:st=0.990000:d=0.010000"));
+        let last = audio_chain(&g, 2);
+        assert!(last.contains("afade=t=in") && last.contains("afade=t=out"));
+    }
+
+    #[test]
+    fn a_tiny_cut_gets_fades_that_do_not_overlap() {
+        let g = build_filter_graph(&[cut(0, 1.0, 1.01)], &[true], &OPTS).unwrap();
+        assert!(g.contains("afade=t=in:st=0:d=0.005000"));
+        assert!(g.contains("afade=t=out:st=0.005000:d=0.005000"));
+    }
+
+    #[test]
+    fn loudness_target_normalizes_the_mix() {
+        let opts = RenderOptions {
+            loudness: Some(-14.0),
+            ..OPTS
+        };
+        let g = build_filter_graph(&[cut(0, 0.0, 1.0)], &[true], &opts).unwrap();
+        assert!(g.contains("concat=n=1:v=1:a=1[outv][mix]"));
+        assert!(g.contains("[mix]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[outa]"));
+        let plain = build_filter_graph(&[cut(0, 0.0, 1.0)], &[true], &OPTS).unwrap();
+        assert!(!plain.contains("loudnorm"));
+    }
 
     #[test]
     fn empty_edl_is_rejected() {

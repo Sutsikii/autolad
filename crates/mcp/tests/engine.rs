@@ -314,6 +314,7 @@ async fn draft_render_produces_a_playable_smaller_video() {
             height: None,
             fps: None,
             overwrite: false,
+            loudness: Some(-14.0),
         })
         .await
         .unwrap();
@@ -346,6 +347,7 @@ async fn render_refuses_dangerous_or_pointless_requests() {
         height: None,
         fps: None,
         overwrite: false,
+        loudness: Some(-14.0),
     };
 
     // Nothing to render yet.
@@ -405,6 +407,7 @@ async fn cancelling_a_render_stops_ffmpeg_and_removes_the_output() {
             height: None,
             fps: None,
             overwrite: false,
+            loudness: Some(-14.0),
         })
         .await
         .unwrap();
@@ -525,6 +528,7 @@ async fn a_clip_without_sound_can_be_imported_edited_and_rendered() {
             height: None,
             fps: None,
             overwrite: false,
+            loudness: Some(-14.0),
         })
         .await
         .unwrap();
@@ -782,6 +786,7 @@ async fn every_video_shape_is_imported_previewed_and_exported_at_the_right_size(
                 height: None,
                 fps: None,
                 overwrite: true,
+                loudness: Some(-14.0),
             })
             .await
             .unwrap();

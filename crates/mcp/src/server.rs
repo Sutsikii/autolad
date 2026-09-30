@@ -130,6 +130,9 @@ fn op_step(ops: &[EdlOpInput]) -> Step {
     step
 }
 
+/// Streaming platforms normalize to about -14 LUFS.
+const DEFAULT_LUFS: f64 = -14.0;
+
 // ---- Tool arguments (their doc comments become the JSON schema descriptions) ----
 
 #[derive(Deserialize, JsonSchema)]
@@ -266,6 +269,11 @@ struct RenderStartArgs {
     fps: Option<f64>,
     /// Replace the output if it already exists. Default false.
     overwrite: Option<bool>,
+    /// Normalize the loudness (EBU R128) so the video sounds as loud as others on streaming
+    /// platforms. Default true.
+    normalize_audio: Option<bool>,
+    /// Loudness target in LUFS when normalizing, -70..-5. Default -14 (YouTube, Spotify).
+    target_lufs: Option<f64>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -482,6 +490,10 @@ impl AutoladServer {
             height: a.height,
             fps: a.fps,
             overwrite: a.overwrite.unwrap_or(false),
+            loudness: a
+                .normalize_audio
+                .unwrap_or(true)
+                .then_some(a.target_lufs.unwrap_or(DEFAULT_LUFS)),
         };
         let step = Step::new("render_start", "Starting the export", false);
         let work = async {
