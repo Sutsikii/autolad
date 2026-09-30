@@ -127,6 +127,8 @@ UPDATE_BINDINGS=1 cargo test -p autolad bindings   # regenerate src/ipc/bindings
 - `src-tauri/build.rs` embarque `app.manifest` (comctl32 v6) sur toutes les cibles, sinon les binaires de test plantent au chargement (`STATUS_ENTRYPOINT_NOT_FOUND`).
 - Le test `bindings_are_up_to_date` échoue si `src/ipc/bindings.ts` est périmé.
 - `core` expose `specta::Type` derrière la feature `specta` (activée par `src-tauri` uniquement).
+- `mcp` expose aussi `specta` (activée par `src-tauri`) : l'UI desktop réutilise `Engine` (import, silences, EDL, preview, rendu) via `src-tauri/src/commands/editor.rs`, donc une seule logique pour l'UI et pour les agents. Les indices/tailles 64 bits sont exportés en `number` (`BigIntExportBehavior::Number`).
+- UI : pas de plugin dialog (dépendance non ajoutée). Import par glisser-déposer (chemins réels via `onDragDropEvent`) ou chemin collé ; l'export écrit `<source>_autolad.mp4` à côté du premier rush. La preview est un PNG par position du playhead (pas de lecture audio/vidéo continue).
 - Prérequis Windows : CMake, LLVM (libclang, pour bindgen) et Vulkan SDK (`winget install Kitware.CMake LLVM.LLVM KhronosGroup.VulkanSDK`), plus MSVC. `LIBCLANG_PATH` est posé par `.cargo/config.toml`.
 - `.cargo/config.toml` place `target-dir` en `C:/t` : whisper.cpp + Vulkan imbriquent des dossiers CMake qui dépassent 260 caractères, et le FileTracker de MSBuild ne gère pas les chemins longs (`FTK1011`). Marge faible : ne pas rallonger ce chemin.
 - `whisper-rs` 0.16.0 : `set_abort_callback_safe` est bugué avec une closure nue (cast de pointeur incorrect, `whisper_full` échoue en -6). On passe un `Box<dyn FnMut() -> bool>` (voir `transcribe/src/whisper.rs`). À revoir à la mise à jour.
