@@ -9,6 +9,10 @@ use crate::error::CoreError;
 /// Probed durations can differ from the real stream end by a few milliseconds.
 const DURATION_TOLERANCE: f64 = 0.05;
 
+/// What a removal leaves of a cut is dropped when shorter than this (about a frame): a sliver
+/// that short would only be heard as a click.
+const MIN_LEFTOVER: f64 = 0.04;
+
 /// One edit. Indices refer to the EDL as it is when the op runs, so a batch is
 /// applied in order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -32,6 +36,13 @@ pub enum EdlOp {
     },
     /// Removes every cut.
     Clear,
+    /// Removes the source range `start..end` of `asset` wherever the EDL plays it, trimming or
+    /// splitting the cuts it overlaps. How text-based edits (a sentence, a filler) are applied.
+    RemoveRange {
+        asset: AssetId,
+        start: f64,
+        end: f64,
+    },
 }
 
 /// Applies `ops` in order to a copy of `edl`. All-or-nothing: if any op is invalid,
@@ -102,7 +113,36 @@ fn apply_one(cuts: &mut Vec<Cut>, op: &EdlOp, assets: &[Asset]) -> Result<(), Co
             );
         }
         EdlOp::Clear => cuts.clear(),
+        EdlOp::RemoveRange { asset, start, end } => {
+            let range = checked_range(asset, *start, *end, assets)?;
+            remove_range(cuts, asset, range)?;
+        }
     }
+    Ok(())
+}
+
+fn remove_range(cuts: &mut Vec<Cut>, asset: &AssetId, removed: TimeRange) -> Result<(), CoreError> {
+    let mut kept = Vec::with_capacity(cuts.len() + 1);
+    for cut in cuts.drain(..) {
+        let overlaps =
+            cut.asset == *asset && cut.range.start < removed.end && cut.range.end > removed.start;
+        if !overlaps {
+            kept.push(cut);
+            continue;
+        }
+        for (start, end) in [
+            (cut.range.start, removed.start),
+            (removed.end, cut.range.end),
+        ] {
+            if end - start >= MIN_LEFTOVER {
+                kept.push(Cut {
+                    asset: cut.asset.clone(),
+                    range: TimeRange::new(start, end)?,
+                });
+            }
+        }
+    }
+    *cuts = kept;
     Ok(())
 }
 
@@ -118,6 +158,7 @@ pub fn describe_ops(ops: &[EdlOp]) -> String {
         EdlOp::Move { from, .. } => format!("Move clip {}", from + 1),
         EdlOp::Insert { .. } => "Add a clip".to_owned(),
         EdlOp::Clear => "Clear the timeline".to_owned(),
+        EdlOp::RemoveRange { start, end, .. } => format!("Remove {:.1} s", end - start),
     };
     match ops.len() {
         1 => label,
@@ -319,8 +360,48 @@ mod tests {
             .is_empty());
     }
 
+    fn remove(a: &str, start: f64, end: f64) -> EdlOp {
+        EdlOp::RemoveRange {
+            asset: id(a),
+            start,
+            end,
+        }
+    }
+
+    #[test]
+    fn remove_range_splits_the_cut_it_falls_inside() {
+        let out = apply_ops(&edl(), &[remove("a", 4.5, 5.0)], &assets()).unwrap();
+        assert_eq!(
+            ranges(&out),
+            vec![(0.0, 2.0), (4.0, 4.5), (5.0, 6.0), (1.0, 3.0)]
+        );
+    }
+
+    #[test]
+    fn remove_range_trims_every_cut_it_overlaps_and_drops_covered_ones() {
+        // Covers the end of cut 0 and all of cut 1; cut 2 is another asset.
+        let out = apply_ops(&edl(), &[remove("a", 1.0, 7.0)], &assets()).unwrap();
+        assert_eq!(ranges(&out), vec![(0.0, 1.0), (1.0, 3.0)]);
+        assert_eq!(out.cuts[1].asset, id("b"));
+    }
+
+    #[test]
+    fn remove_range_does_not_leave_slivers() {
+        let out = apply_ops(&edl(), &[remove("a", 4.02, 5.99)], &assets()).unwrap();
+        assert_eq!(ranges(&out), vec![(0.0, 2.0), (1.0, 3.0)]);
+    }
+
+    #[test]
+    fn remove_range_outside_the_edit_changes_nothing() {
+        let out = apply_ops(&edl(), &[remove("a", 8.0, 9.0)], &assets()).unwrap();
+        assert_eq!(out, edl());
+        assert!(apply_ops(&edl(), &[remove("a", 3.0, 2.0)], &assets()).is_err());
+        assert!(apply_ops(&edl(), &[remove("ghost", 0.0, 1.0)], &assets()).is_err());
+    }
+
     #[test]
     fn batches_are_named_after_their_first_op() {
+        assert_eq!(describe_ops(&[remove("a", 1.0, 2.25)]), "Remove 1.2 s");
         assert_eq!(describe_ops(&[]), "Edit the timeline");
         assert_eq!(describe_ops(&[EdlOp::Delete { index: 1 }]), "Delete clip 2");
         let ops = [
