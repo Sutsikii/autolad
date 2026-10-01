@@ -19,11 +19,7 @@ use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
 fn binaries() -> Binaries {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src-tauri/binaries");
-    let triple = "x86_64-pc-windows-msvc";
-    Binaries {
-        ffmpeg: dir.join(format!("ffmpeg-{triple}.exe")),
-        ffprobe: dir.join(format!("ffprobe-{triple}.exe")),
-    }
+    Binaries::sidecars_in(&dir)
 }
 
 fn scratch(name: &str) -> PathBuf {

@@ -1,7 +1,7 @@
 # AutoLad
 
 App desktop de montage vidéo automatique, 100 % locale (aucun service cloud).
-Distribuée sous forme d'installeur Windows (.exe / .msi) et de .dmg macOS (Apple Silicon, construit par GitHub Actions).
+Distribuée sous forme d'installeur Windows (.exe / .msi) et de .dmg macOS (construit sur un Mac avec `scripts/build-macos.sh`).
 
 ## Stack
 
@@ -117,7 +117,7 @@ pnpm typecheck
 pnpm test               # vitest (front)
 pwsh scripts/fetch-ffmpeg.ps1   # requis avant build/tests : installe les sidecars ffmpeg/ffprobe
 bash scripts/fetch-ffmpeg.sh    # idem sur macOS
-gh workflow run macos.yml       # build du .dmg macOS (artefact du run ; un tag v* l'attache à la release)
+bash scripts/build-macos.sh     # .app + .dmg, à lancer sur un Mac (pas de compilation croisée depuis Windows)
 cargo test -p autolad-transcribe --test whisper -- --ignored --nocapture   # télécharge un modèle (~190 Mo)
 cargo test -p autolad-mcp --test engine -- --ignored --nocapture          # montage par le texte sur vraie parole (voix Windows + whisper)
 autolad.exe --mcp       # serveur MCP ; en dev : `cargo run -q -p autolad -- --mcp` (voir .mcp.json)
@@ -136,7 +136,7 @@ UPDATE_BINDINGS=1 cargo test -p autolad bindings   # regenerate src/ipc/bindings
 - Miniatures (`thumbs/<id>.jpg`, une bande de tuiles 78×44 tirée des keyframes du proxy) et pics audio (`waves/<id>.bin`, 100 octets/s, transmis en base64 par l'IPC) sont dessinés dans le canvas de la timeline. Tout est caché par id d'asset (hash) ; fichiers écrits en `.part` puis renommés.
 - Protocole `asset://` : feature Cargo `protocol-asset` de `tauri` + scope `$APPLOCALDATA/{proxies,thumbs,waves}/**` dans `tauri.conf.json`. Le scope suit le dossier de données : `AUTOLAD_HOME` le contourne, ne pas l'utiliser pour lancer l'UI.
 - Test e2e de l'UI sans écran : lancer l'exe avec `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` et piloter la webview en CDP (invoke des commandes, `Page.captureScreenshot`). Ne pas taper dans la fenêtre pendant le test : les raccourcis (Suppr, S…) modifient l'EDL.
-- macOS : `.github/workflows/macos.yml` (runner `macos-15`, Apple Silicon) teste le workspace puis produit le `.dmg`. Il remplace `target-dir` et `LIBCLANG_PATH` de `.cargo/config.toml` par des variables d'environnement (`CARGO_BUILD_TARGET_DIR`, libclang de Xcode). ffmpeg vient de martin-riedl.de (build GPL statique 8.1.2, BtbN n'a pas de macOS), épinglé avec SHA-256 dans `fetch-ffmpeg.sh`. App signée ad hoc (`signingIdentity: "-"`), sans compte Apple Developer : au premier lancement, clic droit → Ouvrir, ou `xattr -cr /Applications/AutoLad.app`. Dossier de données : `~/Library/Application Support/com.autolad.app` (même dossier que `$APPLOCALDATA`). Encodage vidéo en libx264 sur Mac (VideoToolbox non câblé).
+- macOS : build local uniquement, sur un Mac (pas de CI) : `scripts/build-macos.sh` remplace `target-dir` et `LIBCLANG_PATH` de `.cargo/config.toml` par des variables d'environnement (`CARGO_BUILD_TARGET_DIR`, libclang de Xcode) puis produit `.app` + `.dmg` dans `target/release/bundle/`. ffmpeg vient de martin-riedl.de (build GPL statique 8.1.2, BtbN n'a pas de macOS), épinglé avec SHA-256 dans `fetch-ffmpeg.sh`. App signée ad hoc (`signingIdentity: "-"`), sans compte Apple Developer : au premier lancement, clic droit → Ouvrir, ou `xattr -cr /Applications/AutoLad.app`. Dossier de données : `~/Library/Application Support/com.autolad.app` (même dossier que `$APPLOCALDATA`). Encodage vidéo en libx264 sur Mac (VideoToolbox non câblé).
 - Prérequis Windows : CMake, LLVM (libclang, pour bindgen) et Vulkan SDK (`winget install Kitware.CMake LLVM.LLVM KhronosGroup.VulkanSDK`), plus MSVC. `LIBCLANG_PATH` est posé par `.cargo/config.toml`.
 - `.cargo/config.toml` place `target-dir` en `C:/t` : whisper.cpp + Vulkan imbriquent des dossiers CMake qui dépassent 260 caractères, et le FileTracker de MSBuild ne gère pas les chemins longs (`FTK1011`). Marge faible : ne pas rallonger ce chemin.
 - `whisper-rs` 0.16.0 : `set_abort_callback_safe` est bugué avec une closure nue (cast de pointeur incorrect, `whisper_full` échoue en -6). On passe un `Box<dyn FnMut() -> bool>` (voir `transcribe/src/whisper.rs`). À revoir à la mise à jour.

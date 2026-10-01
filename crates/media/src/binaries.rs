@@ -3,6 +3,14 @@ use std::path::{Path, PathBuf};
 
 use crate::error::MediaError;
 
+/// Target triple in the sidecars' file names (see `scripts/fetch-ffmpeg.*`).
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const SIDECAR_TRIPLE: &str = "aarch64-apple-darwin";
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+const SIDECAR_TRIPLE: &str = "x86_64-apple-darwin";
+#[cfg(not(target_os = "macos"))]
+const SIDECAR_TRIPLE: &str = "x86_64-pc-windows-msvc";
+
 /// Env var overriding where ffmpeg/ffprobe are looked up (dev, tests, custom builds).
 pub const DIR_ENV: &str = "AUTOLAD_FFMPEG_DIR";
 
@@ -30,6 +38,15 @@ impl Binaries {
             dirs.extend(std::env::split_paths(&path));
         }
         Self::discover_in(&dirs)
+    }
+
+    /// The sidecars as installed in `dir` before bundling (`src-tauri/binaries`): Tauri wants
+    /// them suffixed with the target triple.
+    pub fn sidecars_in(dir: &Path) -> Self {
+        Self {
+            ffmpeg: dir.join(format!("ffmpeg-{SIDECAR_TRIPLE}{EXE_SUFFIX}")),
+            ffprobe: dir.join(format!("ffprobe-{SIDECAR_TRIPLE}{EXE_SUFFIX}")),
+        }
     }
 
     pub fn discover_in(dirs: &[PathBuf]) -> Result<Self, MediaError> {

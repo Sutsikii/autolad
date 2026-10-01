@@ -11,6 +11,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
+use autolad_media::Binaries;
 use serde_json::{json, Value};
 
 const TIMEOUT: Duration = Duration::from_secs(60);
@@ -104,16 +105,18 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
-fn sidecar(tool: &str) -> PathBuf {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("binaries")
-        .join(format!("{tool}-x86_64-pc-windows-msvc.exe"));
-    assert!(path.is_file(), "run `pwsh scripts/fetch-ffmpeg.ps1` first");
+fn ffmpeg() -> PathBuf {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries");
+    let path = Binaries::sidecars_in(&dir).ffmpeg;
+    assert!(
+        path.is_file(),
+        "run `scripts/fetch-ffmpeg.ps1` (or .sh on macOS) first"
+    );
     path
 }
 
 fn make_clip(path: &Path) {
-    let status = Command::new(sidecar("ffmpeg"))
+    let status = Command::new(ffmpeg())
         .args(["-hide_banner", "-loglevel", "error", "-y"])
         .args([
             "-f",

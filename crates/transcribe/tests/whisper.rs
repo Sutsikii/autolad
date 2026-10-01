@@ -16,14 +16,10 @@ use autolad_transcribe::{ModelStore, TranscribeOptions, WhisperModel, WhisperTra
 
 fn binaries() -> Binaries {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src-tauri/binaries");
-    let triple = "x86_64-pc-windows-msvc";
-    let b = Binaries {
-        ffmpeg: dir.join(format!("ffmpeg-{triple}.exe")),
-        ffprobe: dir.join(format!("ffprobe-{triple}.exe")),
-    };
+    let b = Binaries::sidecars_in(&dir);
     assert!(
         b.ffmpeg.is_file(),
-        "run `pwsh scripts/fetch-ffmpeg.ps1` first"
+        "run `scripts/fetch-ffmpeg.ps1 (or .sh on macOS)` first"
     );
     b
 }

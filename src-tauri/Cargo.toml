@@ -12,6 +12,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[dev-dependencies]
+autolad-media = { path = "../crates/media" }
+
 [dependencies]
 autolad-core = { path = "../crates/core", features = ["specta"] }
 autolad-mcp = { path = "../crates/mcp", features = ["specta"] }
