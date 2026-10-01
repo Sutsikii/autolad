@@ -6,7 +6,7 @@ use autolad_core::{Asset, CoreError, Edl};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
 use crate::binaries::Binaries;
-use crate::encoder::Encoder;
+use crate::encoder::{max_bitrate_kbps, Encoder};
 use crate::error::MediaError;
 use crate::filtergraph::{build_filter_graph, PlacedCut};
 use crate::parse::parse_progress_time;
@@ -19,6 +19,7 @@ struct Job<'a> {
     graph_path: &'a Path,
     output: &'a Path,
     total: f64,
+    max_kbps: u32,
     /// ffmpeg runs here: the subtitle file is referred to by name (see `build_filter_graph`).
     workdir: Option<&'a Path>,
 }
@@ -57,6 +58,7 @@ impl FfmpegRenderer {
             graph_path: &graph_path,
             output,
             total: edl.total_duration(),
+            max_kbps: max_bitrate_kbps(options.width, options.height, options.fps),
             workdir: options.subtitles.as_deref().and_then(Path::parent),
         };
         let encoder = self.encoder.for_size(options.width, options.height);
@@ -81,6 +83,7 @@ impl FfmpegRenderer {
             graph_path,
             output,
             total,
+            max_kbps,
             workdir,
         } = *job;
         let mut cmd = command(&self.binaries.ffmpeg);
@@ -101,7 +104,7 @@ impl FfmpegRenderer {
         cmd.arg("-/filter_complex")
             .arg(graph_path)
             .args(["-map", "[outv]", "-map", "[outa]"])
-            .args(encoder.args())
+            .args(encoder.args(max_kbps))
             .args(["-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k"])
             .args(["-movflags", "+faststart"])
             .arg(output)

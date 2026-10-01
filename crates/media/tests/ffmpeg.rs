@@ -10,6 +10,7 @@ use std::process::Command;
 use autolad_core::edl::{build_silence_cut_edl, SilenceSettings};
 use autolad_core::ports::RenderOptions;
 use autolad_core::{Asset, AssetId, Cut, Edl, TimeRange};
+use autolad_media::encoder::max_bitrate_kbps;
 use autolad_media::frame::extract_frame;
 use autolad_media::preview::{
     build_proxy, build_thumbnail_strip, build_waveform, strip_layout, PEAKS_PER_SECOND,
@@ -236,8 +237,12 @@ async fn renders_stay_under_the_bitrate_cap_even_on_noise() {
             .await
             .unwrap();
         let megabits = std::fs::metadata(&out).unwrap().len() as f64 * 8.0 / 1e6 / 10.0;
-        // At most 40 Mb/s plus the 80 Mb buffer spread over 10 s, the audio and the container.
-        assert!(megabits < 50.0, "{encoder:?}: {megabits:.1} Mb/s");
+        let cap = f64::from(max_bitrate_kbps(1280, 720, 30.0)) / 1000.0;
+        // The cap plus its two-second buffer spread over 10 s, the audio and the container.
+        assert!(
+            megabits < cap * 1.2 + 0.5,
+            "{encoder:?}: {megabits:.1} Mb/s"
+        );
     }
 }
 
