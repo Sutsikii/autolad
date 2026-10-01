@@ -309,6 +309,12 @@ struct RenderStartArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct FcpxmlArgs {
+    /// Output path ending in .fcpxml; its folder must exist.
+    output: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct SubtitlesArgs {
     /// Output path ending in .srt (SubRip) or .vtt (WebVTT); its folder must exist.
     output: String,
@@ -608,6 +614,24 @@ impl AutoladServer {
     }
 
     #[tool(
+        description = "Write the edit as Final Cut Pro XML (FCPXML 1.9): one clip per cut on the storyline, linked to the original files, edit points snapped to frames. Opens in Final Cut Pro and DaVinci Resolve to finish the edit (grading, titles, music)."
+    )]
+    async fn export_fcpxml(
+        &self,
+        Parameters(a): Parameters<FcpxmlArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let path = PathBuf::from(a.output);
+        let step = Step::new("export_fcpxml", "Exporting for Final Cut / Resolve", false);
+        let work = async {
+            self.engine
+                .export_fcpxml(&path)
+                .await
+                .map(|saved| serde_json::json!({ "saved_to": saved }))
+        };
+        self.run(step, work).await
+    }
+
+    #[tool(
         description = "Progress of a render job: state (running, done, failed, cancelled), progress 0..1, output path, and the error if it failed."
     )]
     async fn render_status(
@@ -637,7 +661,7 @@ AutoLad edits videos locally. Typical workflow:
 4. Look at the result: get_edl for the cut list, get_edit_transcript to read what the edit says, preview_frame to see any moment of the source or of the edit.
    Edit by text: cut_text removes a sentence or words, remove_fillers the hesitations, remove_retakes the failed takes (all at word precision).
 5. Refine with edit_edl (delete / trim / split / move / insert cuts; a batch is applied atomically). Any change can be reverted with undo (and redo), including the user's.
-6. render_start (use draft=true for a quick low-res check; burn_subtitles=true for captions), poll render_status until state is 'done', or render_cancel. export_subtitles writes an .srt/.vtt.
+6. render_start (use draft=true for a quick low-res check; burn_subtitles=true for captions), poll render_status until state is 'done', or render_cancel. export_subtitles writes an .srt/.vtt, export_fcpxml hands the edit to Final Cut Pro or DaVinci Resolve.
 Times are in seconds. Cut indices refer to get_edl. Use save_project to persist your work."
 )]
 impl ServerHandler for AutoladServer {}

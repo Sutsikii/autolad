@@ -272,6 +272,16 @@ pub async fn export_subtitles(
     Ok(state.engine()?.export_subtitles(&output).await?)
 }
 
+/// Writes the edit as Final Cut Pro XML (Final Cut Pro, DaVinci Resolve).
+#[tauri::command]
+#[specta::specta]
+pub async fn export_fcpxml(
+    state: State<'_, AppState>,
+    output: PathBuf,
+) -> Result<PathBuf, AppError> {
+    Ok(state.engine()?.export_fcpxml(&output).await?)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn render_status(state: State<'_, AppState>, job_id: String) -> Result<JobStatus, AppError> {

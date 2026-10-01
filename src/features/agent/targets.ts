@@ -72,6 +72,7 @@ export function resolveTarget(site: ActionSite): Point | null {
     case "render_start":
     case "render_cancel":
     case "export_subtitles":
+    case "export_fcpxml":
       return centerOf("export");
     default:
       return null;

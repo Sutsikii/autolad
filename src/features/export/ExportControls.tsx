@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { chooseExportPath, chooseSubtitlesPath } from "@/features/project/actions";
+import {
+  chooseExportPath,
+  chooseFcpxmlPath,
+  chooseSubtitlesPath,
+} from "@/features/project/actions";
+import { api, call } from "@/ipc";
+import { fileName } from "@/shared/lib/path";
 import { useTimelineStore } from "@/features/timeline/store";
 import { messageOf, notify } from "@/shared/notify";
 import { btn, btnPrimary } from "@/shared/ui/styles";
@@ -36,6 +42,16 @@ export function ExportControls() {
     try {
       const output = await chooseSubtitlesPath();
       if (output) await exportSubtitles(output);
+    } catch (error) {
+      notify.error(messageOf(error));
+    }
+  };
+  const writeFcpxml = async () => {
+    try {
+      const output = await chooseFcpxmlPath();
+      if (!output) return;
+      const saved = await call(api.exportFcpxml(output));
+      notify.info(`Exported ${fileName(saved)} for Final Cut Pro / DaVinci Resolve`);
     } catch (error) {
       notify.error(messageOf(error));
     }
@@ -104,6 +120,14 @@ export function ExportControls() {
         title="Save the subtitles of the edit as .srt or .vtt"
       >
         Subtitles…
+      </button>
+      <button
+        className={btn}
+        disabled={!hasClips}
+        onClick={() => void writeFcpxml()}
+        title="Save the edit as Final Cut Pro XML, to finish it in Final Cut Pro or DaVinci Resolve"
+      >
+        FCPXML…
       </button>
       <button
         data-agent="export"

@@ -123,6 +123,15 @@ export async function chooseSubtitlesPath(): Promise<string | null> {
   return /\.(srt|vtt)$/i.test(chosen) ? chosen : withExtension(chosen, "srt");
 }
 
+/** Where to write the Final Cut Pro XML; `null` when the user cancels. */
+export async function chooseFcpxmlPath(): Promise<string | null> {
+  const chosen = await save({
+    defaultPath: `${suggestedName()}.fcpxml`,
+    filters: [{ name: "Final Cut Pro XML (Final Cut, DaVinci Resolve)", extensions: ["fcpxml"] }],
+  });
+  return chosen ? withExtension(chosen, "fcpxml") : null;
+}
+
 /** Where to write the export; `null` when the user cancels. */
 export async function chooseExportPath(draft: boolean): Promise<string | null> {
   const suffix = draft ? "_draft" : "";

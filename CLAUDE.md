@@ -183,6 +183,8 @@ UPDATE_BINDINGS=1 cargo test -p autolad bindings   # regenerate src/ipc/bindings
 
 - Sous-titres (`core::subtitles`) : cues construites depuis les mots du montage (fin de phrase, virgule quand la cue est à moitié pleine, pause > 0,8 s, 6 s max, 2 lignes équilibrées de 42 caractères en paysage / 24 en portrait, hésitations masquées, 1 s d'affichage minimum sans chevaucher la suivante). Export `.srt`/`.vtt` (bouton « Subtitles… », outil `export_subtitles`) et incrustation au rendu (case « Captions », `burn_subtitles`) : filtre `subtitles` (libass, blanc gras contour noir, plus petit et plus haut en portrait) après le `concat`. Le .srt temporaire est dans `<data>/tmp` et ffmpeg tourne dans ce dossier : le filtre ne reçoit qu'un nom de fichier ASCII, jamais un chemin Windows à échapper. Whisper étire le dernier mot d'une phrase sur la pause qui suit : une cue reste affichée pendant cette pause.
 
+- Export FCPXML 1.9 (`core::fcpxml`, bouton « FCPXML… », outil `export_fcpxml`) pour finir dans Final Cut Pro / DaVinci Resolve : un `asset-clip` par cut sur le storyline, `media-rep` en URL `file:///` encodée, temps rationnels calés sur les frames de la séquence (format du premier clip ; NTSC en `1001/30000s`), cut de moins d'une frame ignoré. Non testé dans FCP/Resolve (structure vérifiée contre une référence de la DTD). Premiere n'importe pas le FCPXML (il lui faudrait l'XML FCP7) : à faire si besoin.
+
 - Fichier projet : JSON versionné (`version: 1`), écrit atomiquement, autosauvegardé une fois lié par `save_project`. L'UI et l'agent partagent le même fichier lié ; « Nouveau » le délie (plus aucune écriture vers l'ancien fichier).
 - Modèle Whisper par défaut : `small` q5_1. Backend GPU : Vulkan.
 - ffmpeg : build GPL statique BtbN en sidecar.

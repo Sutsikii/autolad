@@ -8,6 +8,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use autolad_core::edl::{build_silence_cut_edl, SilenceSettings};
 use autolad_core::edl_edit::{apply_ops, describe_ops, EdlOp};
+use autolad_core::fcpxml::{to_fcpxml, MediaFormat};
 use autolad_core::history::{History, HistoryStatus};
 use autolad_core::ports::{RenderOptions, TranscriptSegment};
 use autolad_core::transcript::sentences;
@@ -867,6 +868,43 @@ impl Engine {
         }))
     }
 
+    /// Writes the edit as Final Cut Pro XML, to finish it in Final Cut Pro or DaVinci Resolve.
+    pub async fn export_fcpxml(&self, output: &Path) -> Result<PathBuf, EngineError> {
+        let output = std::path::absolute(output).map_err(|e| io_err(output, &e))?;
+        if !output
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("fcpxml"))
+        {
+            return Err(EngineError::Invalid(
+                "output must be an .fcpxml file".into(),
+            ));
+        }
+        if !output.parent().is_some_and(Path::is_dir) {
+            return Err(EngineError::Invalid(format!(
+                "output folder does not exist: {}",
+                output.display()
+            )));
+        }
+        let (edl, sources) = {
+            let state = lock(&self.state);
+            let sources: Vec<(Asset, MediaFormat)> = state
+                .project
+                .assets
+                .iter()
+                .map(|e| (e.asset.clone(), media_format(e)))
+                .collect();
+            (state.project.edl.clone(), sources)
+        };
+        let name = output
+            .file_stem()
+            .map_or_else(|| "AutoLad".into(), |s| s.to_string_lossy().into_owned());
+        let xml = to_fcpxml(&name, &edl, &sources)?;
+        tokio::fs::write(&output, xml)
+            .await
+            .map_err(|e| io_err(&output, &e))?;
+        Ok(output)
+    }
+
     pub fn render_status(&self, job_id: &str) -> Result<JobStatus, EngineError> {
         self.jobs.status(job_id)
     }
@@ -963,6 +1001,16 @@ pub fn summarize_edl(edl: &Edl, history: HistoryStatus) -> EdlSummary {
         cuts,
         total_duration: edl.total_duration(),
         history,
+    }
+}
+
+/// The probed format of a source; an unknown one is taken as 1080p30, like renders do.
+fn media_format(e: &AssetEntry) -> MediaFormat {
+    let fallback = MediaFormat::default();
+    MediaFormat {
+        width: e.width.unwrap_or(fallback.width),
+        height: e.height.unwrap_or(fallback.height),
+        fps: e.fps.unwrap_or(fallback.fps),
     }
 }
 
@@ -1370,6 +1418,28 @@ mod tests {
             .export_subtitles(&dir.join("missing/a.srt"))
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn the_edit_is_exported_as_fcpxml() {
+        let engine = engine_with_asset();
+        let dir = std::env::temp_dir().join(format!("autolad-fcpxml-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(engine
+            .export_fcpxml(&dir.join("empty.fcpxml"))
+            .await
+            .is_err());
+
+        engine.edit_edl(vec![insert(1.0, 3.0)]).await.unwrap();
+        let path = engine
+            .export_fcpxml(&dir.join("Mon montage.fcpxml"))
+            .await
+            .unwrap();
+        let xml = std::fs::read_to_string(path).unwrap();
+        assert!(xml.contains("<project name=\"Mon montage\">"));
+        assert!(xml.contains("start=\"25/25s\" duration=\"50/25s\""));
+        assert!(xml.contains("width=\"640\" height=\"360\""));
+        assert!(engine.export_fcpxml(&dir.join("x.xml")).await.is_err());
     }
 
     #[tokio::test]

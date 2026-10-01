@@ -195,6 +195,7 @@ fn handshake_and_tool_catalogue() {
         "render_status",
         "render_cancel",
         "export_subtitles",
+        "export_fcpxml",
     ] {
         assert!(
             names.contains(&expected),

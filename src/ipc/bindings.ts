@@ -241,6 +241,17 @@ async exportSubtitles(output: string) : Promise<Result<SubtitleExport, AppError>
 }
 },
 /**
+ * Writes the edit as Final Cut Pro XML (Final Cut Pro, DaVinci Resolve).
+ */
+async exportFcpxml(output: string) : Promise<Result<string, AppError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_fcpxml", { output }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Whether Claude Desktop and Claude Code are installed, and already connected to AutoLad.
  */
 async claudeSetup() : Promise<Result<ClaudeSetup, AppError>> {
