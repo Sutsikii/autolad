@@ -1,6 +1,11 @@
 use crate::binaries::Binaries;
 use crate::process::command;
 
+/// Highest video bitrate of a render: YouTube asks 35-68 Mb/s for 4K60 uploads.
+const MAX_BITRATE: &str = "40M";
+/// Two seconds of the maximum rate: room for detailed scenes without overshooting for long.
+const BUFFER_SIZE: &str = "80M";
+
 /// H.264 encoder. Hardware first (much faster), libx264 as the universal fallback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Encoder {
@@ -42,6 +47,11 @@ impl Encoder {
     }
 
     /// Video encoding arguments, tuned to look close to `libx264 -crf 20`.
+    ///
+    /// Constant quality alone lets grainy high-resolution footage (foliage, 4K phone or
+    /// action-cam rushes) climb to 100 Mb/s; NVENC and libx264 are capped at
+    /// [`MAX_BITRATE`], which platforms re-encode from without visible loss. QSV and AMF keep
+    /// pure constant quality: their capped modes could not be checked on real hardware.
     pub fn args(self) -> Vec<&'static str> {
         match self {
             Encoder::Nvenc => vec![
@@ -55,13 +65,28 @@ impl Encoder {
                 "21",
                 "-b:v",
                 "0",
+                "-maxrate",
+                MAX_BITRATE,
+                "-bufsize",
+                BUFFER_SIZE,
             ],
             Encoder::Qsv => vec!["-c:v", "h264_qsv", "-global_quality", "21"],
             Encoder::Amf => vec![
                 "-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "21", "-qp_p",
                 "21",
             ],
-            Encoder::X264 => vec!["-c:v", "libx264", "-preset", "medium", "-crf", "20"],
+            Encoder::X264 => vec![
+                "-c:v",
+                "libx264",
+                "-preset",
+                "medium",
+                "-crf",
+                "20",
+                "-maxrate",
+                MAX_BITRATE,
+                "-bufsize",
+                BUFFER_SIZE,
+            ],
         }
     }
 
@@ -113,6 +138,16 @@ mod tests {
                 && Encoder::Amf.is_hardware()
         );
         assert!(!Encoder::X264.is_hardware());
+    }
+
+    #[test]
+    fn nvenc_and_x264_cap_the_bitrate() {
+        for enc in [Encoder::Nvenc, Encoder::X264] {
+            let args = enc.args();
+            let pos = args.iter().position(|a| *a == "-maxrate").unwrap();
+            assert_eq!(args[pos + 1], MAX_BITRATE);
+            assert!(args.contains(&"-bufsize"));
+        }
     }
 
     #[test]

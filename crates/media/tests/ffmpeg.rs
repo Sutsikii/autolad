@@ -187,6 +187,60 @@ async fn rushes_of_different_sizes_are_conformed() {
     assert!((info.duration - 3.0).abs() < 0.3, "got {}s", info.duration);
 }
 
+/// Pure noise with sound: the worst case for an encoder's bitrate.
+fn make_noise_clip(b: &Binaries, path: &Path) {
+    let status = Command::new(&b.ffmpeg)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+        ])
+        .arg("nullsrc=s=1280x720:r=30:d=10,geq=lum='random(1)*255':cb=128:cr=128")
+        .args(["-f", "lavfi", "-i", "sine=duration=10"])
+        .args(["-c:v", "libx264", "-qp", "0", "-preset", "ultrafast"])
+        .args(["-c:a", "aac", "-shortest"])
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+#[tokio::test]
+async fn renders_stay_under_the_bitrate_cap_even_on_noise() {
+    let b = binaries();
+    let dir = scratch("bitrate");
+    let clip = dir.join("noise.mp4");
+    make_noise_clip(&b, &clip);
+    let edl = Edl {
+        cuts: vec![cut("a", 0.0, 10.0)],
+    };
+    let options = RenderOptions {
+        width: 1280,
+        height: 720,
+        fps: 30.0,
+        ..OPTS
+    };
+    let mut encoders = vec![Encoder::X264];
+    let detected = Encoder::detect(&b).await;
+    if detected.is_hardware() {
+        encoders.push(detected);
+    }
+    for encoder in encoders {
+        let out = dir.join(format!("{encoder:?}.mp4"));
+        FfmpegRenderer::new(b.clone(), encoder)
+            .render_edl(&[asset("a", &clip)], &edl, &options, &out, &|_| {})
+            .await
+            .unwrap();
+        let megabits = std::fs::metadata(&out).unwrap().len() as f64 * 8.0 / 1e6 / 10.0;
+        // At most 40 Mb/s plus the 80 Mb buffer spread over 10 s, the audio and the container.
+        assert!(megabits < 50.0, "{encoder:?}: {megabits:.1} Mb/s");
+    }
+}
+
 #[tokio::test]
 async fn detected_encoder_can_render() {
     let b = binaries();
