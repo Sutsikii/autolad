@@ -12,6 +12,11 @@ use crate::error::EngineError;
 /// Name of the server in the Claude configs.
 pub const SERVER_NAME: &str = "autolad";
 const DESKTOP_CONFIG: &str = "claude_desktop_config.json";
+/// The Claude Code CLI: `claude.exe` (native install) or `claude.cmd` (npm install) on Windows.
+#[cfg(windows)]
+const CLI_NAMES: &[&str] = &["claude.exe", "claude.cmd"];
+#[cfg(not(windows))]
+const CLI_NAMES: &[&str] = &["claude"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -54,10 +59,17 @@ impl Locations {
         let exe = std::env::current_exe()
             .map_err(|e| EngineError::Io(format!("cannot locate autolad.exe: {e}")))?;
         let env_dir = |name: &str| std::env::var_os(name).map(PathBuf::from);
-        let home = env_dir("USERPROFILE");
+        let home = env_dir("USERPROFILE").or_else(|| env_dir("HOME"));
+        // Claude Desktop keeps its config under the roaming AppData folder on Windows, under
+        // Application Support on macOS.
+        let app_data = if cfg!(target_os = "macos") {
+            home.as_ref().map(|h| h.join("Library/Application Support"))
+        } else {
+            env_dir("APPDATA")
+        };
         Ok(Self {
             exe,
-            app_data: env_dir("APPDATA"),
+            app_data,
             local_app_data: env_dir("LOCALAPPDATA"),
             claude_cli: find_claude_cli(std::env::var_os("PATH"), home.as_deref()),
             home,
@@ -126,7 +138,7 @@ async fn connect_desktop(at: &Locations) -> Result<(), EngineError> {
     let dirs = at.desktop_dirs();
     if dirs.is_empty() {
         return Err(EngineError::Invalid(
-            "Claude Desktop is not installed (no Claude folder in AppData)".into(),
+            "Claude Desktop is not installed (no Claude config folder found)".into(),
         ));
     }
     for dir in dirs {
@@ -195,8 +207,7 @@ async fn run_cli(cli: &Path, args: &[&str]) -> Result<std::process::Output, Engi
         .map_err(|e| EngineError::Io(format!("{}: {e}", cli.display())))
 }
 
-/// `claude.exe` (native install) or `claude.cmd` (npm install), on the PATH or in the native
-/// installer's folder.
+/// The Claude Code CLI ([`CLI_NAMES`]), on the PATH or in the native installer's folder.
 fn find_claude_cli(path: Option<std::ffi::OsString>, home: Option<&Path>) -> Option<PathBuf> {
     let mut dirs: Vec<PathBuf> = path
         .map(|p| std::env::split_paths(&p).collect())
@@ -205,7 +216,7 @@ fn find_claude_cli(path: Option<std::ffi::OsString>, home: Option<&Path>) -> Opt
         dirs.push(home.join(".local/bin"));
     }
     dirs.iter()
-        .flat_map(|dir| ["claude.exe", "claude.cmd"].map(|name| dir.join(name)))
+        .flat_map(|dir| CLI_NAMES.iter().map(move |name| dir.join(name)))
         .find(|candidate| candidate.is_file())
 }
 
@@ -253,7 +264,7 @@ pub fn points_to(config: &str, exe: &Path) -> bool {
         .is_some_and(|command| same_path(Path::new(command), exe))
 }
 
-/// Windows paths are case-insensitive and accept both slashes.
+/// Windows paths are case-insensitive and accept both slashes; so is macOS' default APFS.
 fn same_path(a: &Path, b: &Path) -> bool {
     let normalize = |p: &Path| p.to_string_lossy().replace('/', "\\").to_lowercase();
     normalize(a) == normalize(b)
@@ -368,20 +379,18 @@ mod tests {
         let root = scratch("cli");
         assert_eq!(find_claude_cli(None, None), None);
         let npm = root.join("npm");
+        let last_name = CLI_NAMES[CLI_NAMES.len() - 1];
         std::fs::create_dir_all(&npm).unwrap();
-        std::fs::write(npm.join("claude.cmd"), "").unwrap();
+        std::fs::write(npm.join(last_name), "").unwrap();
         let path = std::env::join_paths([root.join("empty"), npm.clone()]).unwrap();
-        assert_eq!(
-            find_claude_cli(Some(path), None),
-            Some(npm.join("claude.cmd"))
-        );
+        assert_eq!(find_claude_cli(Some(path), None), Some(npm.join(last_name)));
 
         let native = root.join("home/.local/bin");
         std::fs::create_dir_all(&native).unwrap();
-        std::fs::write(native.join("claude.exe"), "").unwrap();
+        std::fs::write(native.join(CLI_NAMES[0]), "").unwrap();
         assert_eq!(
             find_claude_cli(None, Some(&root.join("home"))),
-            Some(native.join("claude.exe"))
+            Some(native.join(CLI_NAMES[0]))
         );
     }
 }

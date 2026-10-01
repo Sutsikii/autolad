@@ -23,10 +23,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi"],
+    "targets": "all",
     "externalBin": ["binaries/ffmpeg", "binaries/ffprobe"],
     "resources": { "../third-party/ffmpeg/LICENSE.txt": "licenses/ffmpeg-LICENSE.txt" },
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"]
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.icns", "icons/icon.ico"],
+    "macOS": { "signingIdentity": "-", "minimumSystemVersion": "11.0" }
   }
 }
 
