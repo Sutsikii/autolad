@@ -24,6 +24,8 @@ pub struct AgentActivity {
     pub index: Option<usize>,
     pub time: Option<f64>,
     pub changes_project: bool,
+    /// Render the agent started: the export bar follows it.
+    pub job_id: Option<String>,
 }
 
 impl From<AgentEvent> for AgentActivity {
@@ -35,6 +37,7 @@ impl From<AgentEvent> for AgentActivity {
             index: event.index,
             time: event.time,
             changes_project: event.changes_project,
+            job_id: event.job_id,
         }
     }
 }
@@ -76,6 +79,7 @@ mod tests {
             index: Some(1),
             time: None,
             changes_project: true,
+            job_id: None,
         });
         assert_eq!(activity.tool, "edit_edl");
         assert_eq!(activity.index, Some(1));

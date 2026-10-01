@@ -161,6 +161,32 @@ async fn an_agent_edits_the_hosts_project_and_the_host_sees_it() {
     assert!(events[0].label.contains("clip.mp4"));
     assert!(events[0].changes_project);
 
+    // A render the agent starts reaches the host with its job id, so the UI can follow it.
+    let asset = engine.project_status().assets[0].clone();
+    let insert = json!({ "op": "insert", "index": 0, "asset": asset.id, "start": 0.0, "end": 1.0 });
+    rpc.call(
+        "tools/call",
+        json!({ "name": "edit_edl", "arguments": { "ops": [insert] } }),
+    )
+    .await;
+    let out = dir.join("agent.mp4");
+    let started = rpc
+        .call(
+            "tools/call",
+            json!({ "name": "render_start", "arguments": { "output": out, "draft": true } }),
+        )
+        .await;
+    let job_id = started["result"]["structuredContent"]["job_id"].clone();
+    let finished = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|e| e.tool == "render_start" && e.phase == AgentPhase::Finished)
+        .cloned()
+        .expect("render_start finished event");
+    assert_eq!(json!(finished.job_id), job_id);
+    assert!(job_id.is_string());
+
     bridge.shutdown();
     assert!(!info_path(&data).exists());
 }

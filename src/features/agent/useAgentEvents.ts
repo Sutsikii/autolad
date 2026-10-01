@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { refreshProject } from "@/app/refreshProject";
 import { useSidebarStore } from "@/app/sidebarStore";
+import { useExportStore } from "@/features/export/store";
 import { useLibraryStore } from "@/features/library/store";
 import { useTranscriptStore } from "@/features/transcript/store";
 import { useTimelineStore } from "@/features/timeline/store";
@@ -39,6 +40,9 @@ export function useAgentEvents(): void {
           if (payload.changes_project) void refreshProject();
           if (TRANSCRIPT_TOOLS.has(payload.tool)) {
             void useTranscriptStore.getState().loadStored(useLibraryStore.getState().assets);
+          }
+          if (payload.tool === "render_start" && payload.job_id !== null) {
+            void useExportStore.getState().track(payload.job_id);
           }
           if (payload.tool === "preview_frame" && payload.time !== null) {
             useTimelineStore.getState().seek(payload.time);

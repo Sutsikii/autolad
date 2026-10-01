@@ -290,7 +290,11 @@ agentActivity: "agent-activity"
 /**
  * One step of what an agent is doing, for the virtual cursor.
  */
-export type AgentActivity = { tool: string; phase: AgentPhase; label: string; index: number | null; time: number | null; changes_project: boolean }
+export type AgentActivity = { tool: string; phase: AgentPhase; label: string; index: number | null; time: number | null; changes_project: boolean; 
+/**
+ * Render the agent started: the export bar follows it.
+ */
+job_id: string | null }
 export type AgentPhase = 
 /**
  * The agent just asked for the action; the UI has time to move a cursor there.

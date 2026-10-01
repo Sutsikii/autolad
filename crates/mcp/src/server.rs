@@ -49,6 +49,7 @@ impl AutoladServer {
                 index: step.index,
                 time: step.time,
                 changes_project: step.changes_project,
+                job_id: step.job_id.clone(),
             });
         }
     }
@@ -90,6 +91,7 @@ struct Step {
     index: Option<usize>,
     time: Option<f64>,
     changes_project: bool,
+    job_id: Option<String>,
 }
 
 impl Step {
@@ -100,6 +102,7 @@ impl Step {
             index: None,
             time: None,
             changes_project,
+            job_id: None,
         }
     }
 }
@@ -591,14 +594,13 @@ impl AutoladServer {
                 .then_some(a.target_lufs.unwrap_or(DEFAULT_LUFS)),
             subtitles: a.burn_subtitles.unwrap_or(false),
         };
-        let step = Step::new("render_start", "Starting the export", false);
-        let work = async {
-            self.engine
-                .render_start(request)
-                .await
-                .map(|job_id| serde_json::json!({ "job_id": job_id }))
-        };
-        self.run(step, work).await
+        let mut step = Step::new("render_start", "Starting the export", false);
+        self.begin(&step).await;
+        let result = self.engine.render_start(request).await;
+        // The job id goes with the end of the action: the UI follows the render from there.
+        step.job_id = result.as_ref().ok().cloned();
+        self.end(&step, result.is_ok());
+        respond(result.map(|job_id| serde_json::json!({ "job_id": job_id })))
     }
 
     #[tool(

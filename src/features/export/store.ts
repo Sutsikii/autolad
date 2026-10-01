@@ -16,6 +16,8 @@ interface ExportState {
   writingSubtitles: boolean;
   exportSubtitles: (output: string) => Promise<void>;
   start: (draft: boolean, output: string | null) => Promise<void>;
+  /** Follows a render started elsewhere (by an agent), as if it had been started here. */
+  track: (jobId: string) => Promise<void>;
   refresh: () => Promise<void>;
   cancel: () => Promise<void>;
 }
@@ -53,6 +55,13 @@ export const useExportStore = create<ExportState>((set, get) => ({
       notify.error(messageOf(error));
     } finally {
       set({ starting: false });
+    }
+  },
+  track: async (jobId) => {
+    try {
+      set({ job: await call(api.renderStatus(jobId)) });
+    } catch (error) {
+      notify.error(messageOf(error));
     }
   },
   refresh: async () => {

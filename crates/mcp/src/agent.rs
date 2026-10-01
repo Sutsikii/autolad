@@ -28,6 +28,8 @@ pub struct AgentEvent {
     pub time: Option<f64>,
     /// The project changed: the UI must reload it once the action is finished.
     pub changes_project: bool,
+    /// Render started by the action, so the UI can show its progress like its own exports.
+    pub job_id: Option<String>,
 }
 
 pub type AgentListener = Arc<dyn Fn(AgentEvent) + Send + Sync>;
